@@ -1,0 +1,12 @@
+{
+  "scan_interval_seconds": 300,
+  "max_ram_mb": 4096,
+  "max_vcpus": 2,
+  "allowed_image_ids": [],
+  "name_pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+  "max_name_length": 50,
+  "error_scan_threshold": 3,
+  "max_project_ram_mb": 8192,
+  "max_project_vcpus": 8,
+  "auto_quarantine_rules": ["R4", "R6"]
+}
