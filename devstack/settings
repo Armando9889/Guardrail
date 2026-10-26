@@ -1,0 +1,12 @@
+define_plugin guardrail-lite
+
+enable_service guardrail
+
+GUARDRAIL_DIR=/opt/stack/guardrail
+GUARDRAIL_BIN_DIR=${GUARDRAIL_DIR}/bin
+GUARDRAIL_CONF_DIR=/etc/guardrail
+GUARDRAIL_LOG_DIR=/var/log/guardrail
+GUARDRAIL_DB_FILE=/var/lib/guardrail/guardrail.db
+
+GUARDRAIL_PORT=${GUARDRAIL_PORT:-9876}
+GUARDRAIL_PERIOD=${GUARDRAIL_PERIOD:-300}
