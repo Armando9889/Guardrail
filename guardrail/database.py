@@ -1,14 +1,13 @@
+
 import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 def utc_now():
     """Restituisce un timestamp UTC ISO 8601."""
     return datetime.now(timezone.utc).isoformat()
-
 
 class GuardrailDatabase:
     """Gestisce scansioni, violazioni e operazioni di quarantena."""
@@ -171,17 +170,26 @@ class GuardrailDatabase:
 
     def resolve_absent_violations(self, active_keys):
         """Risolve le violazioni aperte che non compaiono nella scansione."""
-        active = {(str(rule), str(instance)) for rule, instance in active_keys}
+        active = {
+            (str(rule), str(instance))
+            for rule, instance in active_keys
+        }
         now = utc_now()
 
         with self.connection() as conn:
             rows = conn.execute(
-                "SELECT id, rule_id, instance_id FROM violations WHERE status = 'open'"
+                """
+                SELECT id, rule_id, instance_id
+                FROM violations
+                WHERE status = 'open'
+                """
             ).fetchall()
 
             resolved = 0
+
             for row in rows:
                 key = (row["rule_id"], row["instance_id"])
+
                 if key not in active:
                     conn.execute(
                         """
@@ -200,7 +208,10 @@ class GuardrailDatabase:
         with self.connection() as conn:
             if status is None:
                 rows = conn.execute(
-                    "SELECT * FROM violations ORDER BY last_seen DESC"
+                    """
+                    SELECT * FROM violations
+                    ORDER BY last_seen DESC
+                    """
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -216,12 +227,20 @@ class GuardrailDatabase:
 
     def list_scans(self, limit=50):
         """Restituisce le scansioni più recenti."""
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or limit < 1
+        ):
             raise ValueError("limit deve essere un intero positivo")
 
         with self.connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM scans ORDER BY id DESC LIMIT ?",
+                """
+                SELECT * FROM scans
+                ORDER BY id DESC
+                LIMIT ?
+                """,
                 (limit,),
             ).fetchall()
 
@@ -235,11 +254,11 @@ class GuardrailDatabase:
         violation_id=None,
         details=None,
     ):
-        """Registra un tentativo di quarantena o un'altra azione."""
+        """Registra un evento e restituisce il suo ID."""
         now = utc_now()
 
         with self.connection() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 INSERT INTO quarantine_events (
                     violation_id, instance_id, action,
@@ -257,6 +276,8 @@ class GuardrailDatabase:
                 ),
             )
 
+            event_id = cursor.lastrowid
+
             if violation_id is not None:
                 conn.execute(
                     """
@@ -268,9 +289,86 @@ class GuardrailDatabase:
                     (str(result), violation_id),
                 )
 
+            return event_id
+
+    def update_quarantine_event(self, event_id, result, details=None):
+        """Aggiorna l'esito e i dettagli di un evento."""
+        if (
+            not isinstance(event_id, int)
+            or isinstance(event_id, bool)
+            or event_id < 1
+        ):
+            raise ValueError("event_id deve essere un intero positivo")
+
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE quarantine_events
+                SET result = ?, details = ?
+                WHERE id = ?
+                """,
+                (
+                    str(result),
+                    json.dumps(details) if details is not None else None,
+                    event_id,
+                ),
+            )
+
+            if cursor.rowcount == 0:
+                raise ValueError(f"Evento inesistente: {event_id}")
+
+    def get_quarantine_event(self, event_id):
+        """Recupera un evento specifico tramite ID."""
+        with self.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM quarantine_events
+                WHERE id = ?
+                """,
+                (event_id,),
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            event = dict(row)
+
+            if event["details"] is not None:
+                event["details"] = json.loads(event["details"])
+
+            return event
+
+    def get_latest_quarantine_event(self, instance_id):
+        """Recupera l'ultimo evento di quarantena di una VM."""
+        with self.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM quarantine_events
+                WHERE instance_id = ?
+                  AND action = 'quarantine'
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (str(instance_id),),
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            event = dict(row)
+
+            if event["details"] is not None:
+                event["details"] = json.loads(event["details"])
+
+            return event
+
     def list_quarantine_events(self, limit=50):
         """Restituisce gli eventi di quarantena più recenti."""
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or limit < 1
+        ):
             raise ValueError("limit deve essere un intero positivo")
 
         with self.connection() as conn:
