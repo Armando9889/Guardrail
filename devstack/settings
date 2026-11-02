@@ -1,12 +1,23 @@
 define_plugin guardrail-lite
 
+# Guardrail Lite services
 enable_service guardrail
+enable_service guardrail-api
+enable_service guardrail-scheduler
 
+# Directories
 GUARDRAIL_DIR=/opt/stack/guardrail
 GUARDRAIL_BIN_DIR=${GUARDRAIL_DIR}/bin
 GUARDRAIL_CONF_DIR=/etc/guardrail
 GUARDRAIL_LOG_DIR=/var/log/guardrail
 GUARDRAIL_DB_FILE=/var/lib/guardrail/guardrail.db
 
+# Python environment
+GUARDRAIL_VENV=/opt/stack/data/venv
+GUARDRAIL_PYTHON=${GUARDRAIL_VENV}/bin/python
+
+# Configuration
+GUARDRAIL_CONFIG=${GUARDRAIL_CONF_DIR}/config.json
 GUARDRAIL_PORT=${GUARDRAIL_PORT:-9876}
 GUARDRAIL_PERIOD=${GUARDRAIL_PERIOD:-300}
+GUARDRAIL_API_HOST=127.0.0.1

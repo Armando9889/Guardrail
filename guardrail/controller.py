@@ -1,41 +1,58 @@
 import json
 import logging
+import os
 from pathlib import Path
 
 import openstack
 
 from guardrail.database import GuardrailDatabase
 from guardrail.rules import check_instance
+from guardrail.quarantine import QuarantineManager
 
 LOG = logging.getLogger("guardrail.controller")
 
 
 class GuardrailController:
-    """Coordina le scansioni di conformità delle istanze Nova."""
+    """Coordina scansioni, controlli e quarantena delle istanze Nova."""
 
-    def __init__(self, config_path=None, db_path=None, connection=None):
+    def __init__(
+        self,
+        config_path=None,
+        db_path=None,
+        connection=None,
+        quarantine_manager=None,
+    ):
         base_dir = Path(__file__).resolve().parent.parent
 
         self.config_path = Path(
-            config_path or base_dir / "etc" / "config.json"
+            config_path
+            or os.environ.get(
+                "GUARDRAIL_CONFIG",
+                base_dir / "etc" / "config.json",
+            )
         )
-        self.db_path = db_path or str(
-            Path("/var/lib/guardrail/guardrail.db")
+
+        self.db_path = (
+            db_path
+            or os.environ.get(
+                "GUARDRAIL_DB_FILE",
+                "/var/lib/guardrail/guardrail.db",
+            )
         )
 
         self.policy = self._load_policy()
         self.database = GuardrailDatabase(self.db_path)
 
-        # La connessione può essere fornita direttamente nei test.
-        # In esecuzione normale openstacksdk legge le credenziali
-        # dalle variabili OS_* configurate con openrc.
         self.connection = connection
+        self.quarantine_manager = quarantine_manager
 
     def _load_policy(self):
         """Carica e valida la configurazione JSON."""
+
         try:
             with self.config_path.open("r", encoding="utf-8") as file:
                 policy = json.load(file)
+
         except (OSError, json.JSONDecodeError) as exc:
             raise RuntimeError(
                 f"Impossibile leggere la policy {self.config_path}: {exc}"
@@ -45,18 +62,29 @@ class GuardrailController:
             raise ValueError("La policy deve essere un oggetto JSON.")
 
         allowed_images = policy.get("allowed_image_ids")
+
         if not isinstance(allowed_images, list):
             raise ValueError("allowed_image_ids deve essere una lista.")
 
-        for key in (
+        for image_id in allowed_images:
+            if not isinstance(image_id, str) or not image_id:
+                raise ValueError(
+                    "Ogni elemento di allowed_image_ids deve "
+                    "essere una stringa non vuota."
+                )
+
+        numeric_settings = (
             "max_ram_mb",
             "max_vcpus",
             "max_project_ram_mb",
             "max_project_vcpus",
             "max_name_length",
             "error_scan_threshold",
-        ):
+        )
+
+        for key in numeric_settings:
             value = policy.get(key)
+
             if (
                 not isinstance(value, int)
                 or isinstance(value, bool)
@@ -66,208 +94,340 @@ class GuardrailController:
                     f"La policy deve contenere un intero positivo per {key}."
                 )
 
+        auto_rules = policy.get("auto_quarantine_rules", [])
+
+        if not isinstance(auto_rules, list):
+            raise ValueError(
+                "auto_quarantine_rules deve essere una lista."
+            )
+
+        valid_rules = {
+            "R1", "R2", "R3", "R4",
+            "R5", "R6", "R7", "R8",
+        }
+
+        if any(
+            not isinstance(rule, str) or rule not in valid_rules
+            for rule in auto_rules
+        ):
+            raise ValueError(
+                "auto_quarantine_rules contiene una regola non valida."
+            )
+
+        if not isinstance(policy.get("quarantine_dry_run"), bool):
+            raise ValueError(
+                "quarantine_dry_run deve essere un valore booleano."
+            )
+
         return policy
+
+    @staticmethod
+    def _server_to_dict(server):
+        """Converte un'istanza Nova in un dizionario."""
+
+        if hasattr(server, "to_dict"):
+            return server.to_dict()
+
+        if isinstance(server, dict):
+            return server.copy()
+
+        if hasattr(server, "__dict__"):
+            return vars(server).copy()
+
+        raise TypeError(
+            f"Formato istanza Nova non supportato: "
+            f"{type(server).__name__}"
+        )
+
+    @staticmethod
+    def _normalize_server(server):
+        """Normalizza i dati Nova per il motore delle regole."""
+
+        data = GuardrailController._server_to_dict(server)
+
+        flavor = data.get("flavor") or {}
+        image = data.get("image") or {}
+
+        if isinstance(flavor, dict):
+            data["ram_mb"] = flavor.get("ram", data.get("ram_mb"))
+            data["vcpus"] = flavor.get("vcpus", data.get("vcpus"))
+
+        if isinstance(image, dict):
+            data["image_id"] = image.get("id", data.get("image_id"))
+
+        if not data.get("project_id"):
+            data["project_id"] = data.get("tenant_id")
+
+        return data
 
     def _get_connection(self):
         """Restituisce la connessione OpenStack."""
+
         if self.connection is None:
             self.connection = openstack.connect()
+
         return self.connection
 
-    @staticmethod
-    def _resource_id(resource):
-        """Estrae un ID da una risorsa OpenStack o da un dizionario."""
-        if resource is None:
-            return None
-        if isinstance(resource, dict):
-            return resource.get("id")
-        return getattr(resource, "id", None)
+    def _get_quarantine_manager(self):
+        """Crea il gestore della quarantena quando necessario."""
 
-    @staticmethod
-    def _metadata(server):
-        """Normalizza i metadati dell'istanza."""
-        metadata = getattr(server, "metadata", None)
-        return dict(metadata or {})
-
-    def _instance_data(self, server, project_totals, error_counts):
-        """Converte un server Nova nel formato atteso dalle regole."""
-        conn = self._get_connection()
-
-        flavor_ref = getattr(server, "flavor", None) or {}
-        flavor_id = self._resource_id(flavor_ref)
-
-        if flavor_id is None and isinstance(flavor_ref, dict):
-            flavor_id = (
-                flavor_ref.get("original_name")
-                or flavor_ref.get("name")
+        if self.quarantine_manager is None:
+            self.quarantine_manager = QuarantineManager(
+                connection=self._get_connection(),
+                database=self.database,
+                quarantine_security_group=self.policy[
+                    "quarantine_security_group"
+                ],
             )
 
-        flavor = None
-        if flavor_id:
-            try:
-                flavor = conn.compute.get_flavor(flavor_id)
-            except Exception:
-                LOG.exception(
-                    "Impossibile recuperare il flavor della VM %s",
-                    getattr(server, "id", "sconosciuta"),
-                )
+        return self.quarantine_manager
 
-        ram_mb = getattr(flavor, "ram", None) if flavor else None
-        vcpus = getattr(flavor, "vcpus", None) if flavor else None
+    def _get_servers(self):
+        """Recupera le istanze Nova visibili all'amministratore."""
 
-        # Alcune risposte Nova contengono i dettagli del flavor
-        # direttamente nella struttura flavor.
-        if isinstance(flavor_ref, dict):
-            ram_mb = ram_mb if ram_mb is not None else flavor_ref.get("ram")
-            vcpus = vcpus if vcpus is not None else flavor_ref.get("vcpus")
+        connection = self._get_connection()
 
-        project_id = (
-            getattr(server, "project_id", None)
-            or getattr(server, "tenant_id", None)
-            or ""
-        )
-        totals = project_totals.get(
-            str(project_id), {"ram_mb": 0, "vcpus": 0}
-        )
-
-        image_ref = getattr(server, "image", None)
-        image_id = self._resource_id(image_ref)
-
-        status = str(getattr(server, "status", "") or "").upper()
-        consecutive_errors = error_counts.get(str(server.id), 0)
-
-        return {
-            "id": str(getattr(server, "id", "")),
-            "name": str(getattr(server, "name", "") or ""),
-            "metadata": self._metadata(server),
-            "ram_mb": ram_mb,
-            "vcpus": vcpus,
-            "image_id": image_id,
-            "project_id": str(project_id),
-            "status": status,
-            "project_ram_mb": totals["ram_mb"],
-            "project_vcpus": totals["vcpus"],
-            "consecutive_error_scans": consecutive_errors,
-        }
-
-    def _get_servers(self, conn):
-        """Recupera le istanze accessibili all'utente OpenStack."""
         try:
-            return list(conn.compute.servers(details=True, all_projects=True))
+            return list(
+                connection.compute.servers(
+                    all_projects=True,
+                    details=True,
+                )
+            )
+
         except Exception:
             LOG.warning(
-                "Recupero all-projects non riuscito; "
-                "verranno controllate le istanze accessibili."
+                "Impossibile recuperare tutte le istanze. "
+                "Verranno recuperate quelle accessibili.",
+                exc_info=True,
             )
-            return list(conn.compute.servers(details=True))
+
+            return list(
+                connection.compute.servers(details=True)
+            )
 
     def _project_totals(self, servers):
         """Calcola RAM e vCPU aggregate per progetto."""
-        conn = self._get_connection()
+
         totals = {}
 
         for server in servers:
-            project_id = (
-                getattr(server, "project_id", None)
-                or getattr(server, "tenant_id", None)
-                or ""
-            )
-            project_id = str(project_id)
+            server_data = self._normalize_server(server)
 
-            flavor_ref = getattr(server, "flavor", None) or {}
-            flavor_id = self._resource_id(flavor_ref)
+            project_id = server_data.get("project_id")
 
-            if flavor_id is None and isinstance(flavor_ref, dict):
-                flavor_id = (
-                    flavor_ref.get("original_name")
-                    or flavor_ref.get("name")
-                )
-
-            ram_mb = None
-            vcpus = None
-
-            if flavor_id:
-                try:
-                    flavor = conn.compute.get_flavor(flavor_id)
-                    ram_mb = getattr(flavor, "ram", None)
-                    vcpus = getattr(flavor, "vcpus", None)
-                except Exception:
-                    LOG.warning(
-                        "Flavor non disponibile per la VM %s",
-                        getattr(server, "id", "sconosciuta"),
-                    )
-
-            if isinstance(flavor_ref, dict):
-                ram_mb = (
-                    ram_mb if ram_mb is not None else flavor_ref.get("ram")
-                )
-                vcpus = (
-                    vcpus if vcpus is not None else flavor_ref.get("vcpus")
-                )
-
-            if not isinstance(ram_mb, int) or not isinstance(vcpus, int):
+            if not project_id:
                 continue
 
-            totals.setdefault(
-                project_id, {"ram_mb": 0, "vcpus": 0}
-            )
-            totals[project_id]["ram_mb"] += ram_mb
+            ram = server_data.get("ram_mb", 0) or 0
+            vcpus = server_data.get("vcpus", 0) or 0
+
+            if project_id not in totals:
+                totals[project_id] = {
+                    "ram_mb": 0,
+                    "vcpus": 0,
+                }
+
+            totals[project_id]["ram_mb"] += ram
             totals[project_id]["vcpus"] += vcpus
 
         return totals
 
     def _error_counts(self, servers):
-        """Conta le scansioni consecutive in stato ERROR in memoria."""
-        if not hasattr(self, "_previous_error_counts"):
-            self._previous_error_counts = {}
+        """Aggiorna e restituisce i contatori persistenti degli errori."""
 
-        current = {}
+        instance_statuses = {}
+
         for server in servers:
-            instance_id = str(getattr(server, "id", ""))
-            status = str(getattr(server, "status", "") or "").upper()
+            server_data = self._normalize_server(server)
 
-            if status == "ERROR":
-                current[instance_id] = (
-                    self._previous_error_counts.get(instance_id, 0) + 1
+            instance_id = server_data.get("id")
+            status = server_data.get("status")
+
+            if instance_id:
+                instance_statuses[instance_id] = status
+
+        self.database.update_instance_error_counts(instance_statuses)
+
+        return self.database.get_instance_error_counts()
+
+    def _get_instance_violations(self, servers, error_counts):
+        """Applica le regole a ogni istanza normalizzata."""
+
+        violations = []
+
+        for server in servers:
+            server_data = self._normalize_server(server)
+
+            instance_id = str(server_data.get("id", ""))
+
+            server_data["consecutive_error_scans"] = error_counts.get(
+                instance_id,
+                0,
+            )
+
+            instance_violations = check_instance(
+                server_data,
+                self.policy,
+            )
+
+            violations.extend(instance_violations)
+
+        return violations
+
+    def _apply_quarantine(self, violations):
+        """Applica la quarantena solo alle regole autorizzate."""
+
+        auto_rules = set(
+            self.policy.get("auto_quarantine_rules", [])
+        )
+
+        instances_to_quarantine = {}
+
+        for violation in violations:
+            rule = violation.get("rule")
+
+            if rule not in auto_rules:
+                continue
+
+            instance_id = violation.get("instance_id")
+
+            if not instance_id:
+                continue
+
+            if instance_id not in instances_to_quarantine:
+                instances_to_quarantine[instance_id] = []
+
+            instances_to_quarantine[instance_id].append(rule)
+
+        quarantine_results = []
+
+        if not instances_to_quarantine:
+            return quarantine_results
+
+        quarantine_manager = self._get_quarantine_manager()
+
+        dry_run = self.policy.get("quarantine_dry_run", True)
+
+        for instance_id, rules in instances_to_quarantine.items():
+            reason = (
+                "Violazioni automatiche: "
+                + ", ".join(sorted(set(rules)))
+            )
+
+            try:
+                result = quarantine_manager.quarantine_instance(
+                    instance_id=instance_id,
+                    reason=reason,
+                    dry_run=dry_run,
                 )
-            else:
-                current[instance_id] = 0
 
-        self._previous_error_counts = current
-        return current
+                if not isinstance(result, dict):
+                    result = {
+                        "instance_id": instance_id,
+                        "result": "completed",
+                    }
+
+                quarantine_results.append(result)
+
+            except Exception as exc:
+                LOG.exception(
+                    "Errore durante la quarantena dell'istanza %s.",
+                    instance_id,
+                )
+
+                quarantine_results.append({
+                    "instance_id": instance_id,
+                    "result": "failed",
+                    "error": str(exc),
+                })
+
+        return quarantine_results
 
     def scan(self):
-        """Esegue una scansione e registra il risultato nel database."""
+        """Esegue una scansione completa delle istanze OpenStack."""
+
         scan_id = self.database.start_scan()
 
         try:
-            conn = self._get_connection()
-            servers = self._get_servers(conn)
+            servers = self._get_servers()
+
             project_totals = self._project_totals(servers)
+
             error_counts = self._error_counts(servers)
 
-            violations = []
-            for server in servers:
-                instance = self._instance_data(
-                    server, project_totals, error_counts
-                )
-                violations.extend(check_instance(instance, self.policy))
+            violations = self._get_instance_violations(
+                servers,
+                error_counts,
+            )
 
-            active_keys = []
+            # Controlli aggregati per progetto.
+            for project_id, totals in project_totals.items():
+
+                if (
+                    totals["ram_mb"]
+                    > self.policy["max_project_ram_mb"]
+                ):
+                    violations.append({
+                        "rule": "R8",
+                        "message": (
+                            f"Il progetto {project_id} supera "
+                            "il limite aggregato di RAM."
+                        ),
+                        "severity": "WARNING",
+                        "instance_id": None,
+                        "instance_name": None,
+                        "scan_id": scan_id,
+                    })
+
+                if (
+                    totals["vcpus"]
+                    > self.policy["max_project_vcpus"]
+                ):
+                    violations.append({
+                        "rule": "R8",
+                        "message": (
+                            f"Il progetto {project_id} supera "
+                            "il limite aggregato di vCPU."
+                        ),
+                        "severity": "WARNING",
+                        "instance_id": None,
+                        "instance_name": None,
+                        "scan_id": scan_id,
+                    })
+
+            # Registrazione delle violazioni.
             for violation in violations:
-                self.database.record_violation(violation)
-                active_keys.append(
-                    (violation["rule"], violation["instance_id"])
+                violation["scan_id"] = scan_id
+
+                if violation.get("instance_id") is not None:
+                    violation_id = self.database.record_violation(
+                        violation
+                    )
+
+                    violation["violation_id"] = violation_id
+
+            # Risoluzione delle violazioni non più presenti.
+            active_keys = [
+                (
+                    violation["rule"],
+                    violation["instance_id"],
                 )
+                for violation in violations
+                if violation.get("instance_id") is not None
+            ]
 
-            resolved = self.database.resolve_absent_violations(active_keys)
+            self.database.resolve_absent_violations(active_keys)
 
+            # Applicazione della quarantena.
+            quarantine_results = self._apply_quarantine(violations)
+
+            # Registrazione della scansione completata.
             self.database.finish_scan(
                 scan_id=scan_id,
+                status="completed",
                 instances_checked=len(servers),
                 violations_found=len(violations),
-                status="completed",
-                details={"resolved_violations": resolved},
             )
 
             return {
@@ -275,17 +435,20 @@ class GuardrailController:
                 "status": "completed",
                 "instances_checked": len(servers),
                 "violations_found": len(violations),
-                "resolved_violations": resolved,
                 "violations": violations,
+                "quarantine_results": quarantine_results,
             }
 
-        except Exception as exc:
-            LOG.exception("Scansione Guardrail fallita")
+        except Exception:
+            LOG.exception(
+                "Errore durante la scansione Guardrail Lite."
+            )
+
             self.database.finish_scan(
                 scan_id=scan_id,
+                status="failed",
                 instances_checked=0,
                 violations_found=0,
-                status="failed",
-                details={"error": str(exc)},
             )
+
             raise

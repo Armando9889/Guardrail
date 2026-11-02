@@ -9,8 +9,8 @@ class TestGuardrailDatabase(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        db_path = Path(self.temp_dir.name) / "test_guardrail.db"
-        self.db = GuardrailDatabase(db_path)
+        self.db_path = Path(self.temp_dir.name) / "test_guardrail.db"
+        self.db = GuardrailDatabase(self.db_path)
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -94,6 +94,62 @@ class TestGuardrailDatabase(unittest.TestCase):
         self.assertEqual(events[0]["result"], "success")
         self.assertEqual(violation["quarantine_attempts"], 1)
         self.assertEqual(violation["quarantine_result"], "success")
+
+    # TEST R7
+
+    def test_error_count_increments(self):
+        self.db.update_instance_error_counts({
+            "vm-001": "ERROR",
+        })
+
+        self.assertEqual(
+            self.db.get_instance_error_counts()["vm-001"],
+            1,
+        )
+
+        self.db.update_instance_error_counts({
+            "vm-001": "ERROR",
+        })
+
+        self.assertEqual(
+            self.db.get_instance_error_counts()["vm-001"],
+            2,
+        )
+
+    def test_error_count_resets_when_instance_recovers(self):
+        self.db.update_instance_error_counts({
+            "vm-001": "ERROR",
+        })
+
+        self.db.update_instance_error_counts({
+            "vm-001": "ERROR",
+        })
+
+        self.db.update_instance_error_counts({
+            "vm-001": "ACTIVE",
+        })
+
+        self.assertEqual(
+            self.db.get_instance_error_counts()["vm-001"],
+            0,
+        )
+
+    def test_error_count_persists_after_database_reopening(self):
+        self.db.update_instance_error_counts({
+            "vm-001": "ERROR",
+        })
+
+        self.db.update_instance_error_counts({
+            "vm-001": "ERROR",
+        })
+
+        # Simula la riapertura del database.
+        reopened_db = GuardrailDatabase(self.db_path)
+
+        self.assertEqual(
+            reopened_db.get_instance_error_counts()["vm-001"],
+            2,
+        )
 
 
 if __name__ == "__main__":

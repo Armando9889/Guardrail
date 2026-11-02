@@ -1,0 +1,225 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+from guardrail.controller import GuardrailController
+
+
+class TestGuardrailController(unittest.TestCase):
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+
+        self.temp_path = Path(self.temp_dir.name)
+        self.config_path = self.temp_path / "config.json"
+        self.db_path = self.temp_path / "guardrail.db"
+
+        self.policy = {
+            "scan_interval_seconds": 300,
+            "max_ram_mb": 4096,
+            "max_vcpus": 2,
+            "allowed_image_ids": ["cirros-approved"],
+            "name_pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+            "max_name_length": 50,
+            "error_scan_threshold": 3,
+            "max_project_ram_mb": 8192,
+            "max_project_vcpus": 8,
+            "auto_quarantine_rules": ["R4", "R6"],
+            "quarantine_security_group": "guardrail-quarantine",
+            "quarantine_dry_run": True,
+        }
+
+        self._write_config()
+
+        self.connection = MagicMock()
+        self.quarantine_manager = MagicMock()
+
+        self.controller = GuardrailController(
+            config_path=self.config_path,
+            db_path=str(self.db_path),
+            connection=self.connection,
+            quarantine_manager=self.quarantine_manager,
+        )
+
+    def _write_config(self):
+        self.config_path.write_text(
+            json.dumps(self.policy),
+            encoding="utf-8",
+        )
+
+    def _server(
+        self,
+        instance_id="vm-123",
+        image_id="cirros-approved",
+        security_profile="general",
+        status="ACTIVE",
+    ):
+        return SimpleNamespace(
+            id=instance_id,
+            name="test-vm",
+            metadata={
+                "owner": "admin",
+                "security_profile": security_profile,
+            },
+            flavor={
+                "id": "flavor-1",
+                "ram": 1024,
+                "vcpus": 1,
+            },
+            image={"id": image_id},
+            project_id="project-123",
+            status=status,
+        )
+
+    def _prepare_scan(self, servers):
+        self.connection.compute.servers.return_value = servers
+
+        self.quarantine_manager.quarantine_instance.return_value = {
+            "instance_id": "vm-123",
+            "result": "dry_run",
+            "dry_run": True,
+        }
+
+    def test_r4_triggers_quarantine(self):
+        server = self._server(image_id="unauthorized-image")
+        self._prepare_scan([server])
+
+        result = self.controller.scan()
+
+        self.quarantine_manager.quarantine_instance.assert_called_once()
+        self.assertEqual(len(result["quarantine_results"]), 1)
+        self.assertEqual(
+            result["quarantine_results"][0]["result"],
+            "dry_run",
+        )
+
+    def test_r6_triggers_quarantine(self):
+        server = self._server(security_profile="invalid")
+        self._prepare_scan([server])
+
+        result = self.controller.scan()
+
+        self.quarantine_manager.quarantine_instance.assert_called_once()
+        self.assertEqual(len(result["quarantine_results"]), 1)
+
+    def test_non_automatic_rule_does_not_trigger_quarantine(self):
+        server = self._server()
+        server.metadata = {"security_profile": "general"}
+        server.flavor = {
+            "id": "flavor-1",
+            "ram": 8192,
+            "vcpus": 1,
+        }
+
+        self._prepare_scan([server])
+
+        result = self.controller.scan()
+
+        self.quarantine_manager.quarantine_instance.assert_not_called()
+        self.assertEqual(result["quarantine_results"], [])
+
+    def test_quarantine_failure_does_not_fail_scan(self):
+        server = self._server(image_id="unauthorized-image")
+        self._prepare_scan([server])
+
+        self.quarantine_manager.quarantine_instance.side_effect = (
+            RuntimeError("Quarantine error")
+        )
+
+        result = self.controller.scan()
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(result["quarantine_results"]), 1)
+        self.assertEqual(
+            result["quarantine_results"][0]["result"],
+            "failed",
+        )
+
+    def test_dry_run_is_passed_to_quarantine_manager(self):
+        server = self._server(image_id="unauthorized-image")
+        self._prepare_scan([server])
+
+        self.controller.scan()
+
+        self.quarantine_manager.quarantine_instance.assert_called_once()
+
+        call_kwargs = (
+            self.quarantine_manager.quarantine_instance.call_args.kwargs
+        )
+
+        self.assertTrue(call_kwargs["dry_run"])
+
+    def test_invalid_dry_run_configuration(self):
+        self.policy["quarantine_dry_run"] = "true"
+        self._write_config()
+
+        with self.assertRaises(ValueError):
+            GuardrailController(
+                config_path=self.config_path,
+                db_path=str(self.temp_path / "invalid.db"),
+                connection=self.connection,
+            )
+    def test_r7_persists_after_controller_restart(self):
+        # Prima scansione: la VM è in ERROR.
+        server = self._server(status="ERROR")
+        self._prepare_scan([server])
+
+        first_result = self.controller.scan()
+
+        self.assertEqual(first_result["status"], "completed")
+        self.assertEqual(
+            self.controller.database.get_instance_error_counts()["vm-123"],
+            1,
+        )
+
+        # Seconda scansione: il contatore deve arrivare a 2.
+        second_result = self.controller.scan()
+
+        self.assertEqual(second_result["status"], "completed")
+        self.assertEqual(
+            self.controller.database.get_instance_error_counts()["vm-123"],
+            2,
+        )
+
+        # Simulazione del riavvio: nuovo controller,
+        # stesso database SQLite.
+        restarted_controller = GuardrailController(
+            config_path=self.config_path,
+            db_path=str(self.db_path),
+            connection=self.connection,
+            quarantine_manager=self.quarantine_manager,
+        )
+
+        # Verifica che il conteggio precedente sia stato conservato.
+        self.assertEqual(
+            restarted_controller.database.get_instance_error_counts()[
+                "vm-123"
+            ],
+            2,
+        )
+
+        # Terza scansione: deve scattare R7.
+        third_result = restarted_controller.scan()
+
+        self.assertEqual(third_result["status"], "completed")
+        self.assertEqual(
+            restarted_controller.database.get_instance_error_counts()[
+                "vm-123"
+            ],
+            3,
+        )
+
+        r7_violations = [
+            violation
+            for violation in third_result["violations"]
+            if violation["rule"] == "R7"
+        ]
+
+        self.assertEqual(len(r7_violations), 1)
+
+if __name__ == "__main__":
+    unittest.main()

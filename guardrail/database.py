@@ -1,13 +1,14 @@
-
 import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+
 def utc_now():
     """Restituisce un timestamp UTC ISO 8601."""
     return datetime.now(timezone.utc).isoformat()
+
 
 class GuardrailDatabase:
     """Gestisce scansioni, violazioni e operazioni di quarantena."""
@@ -16,7 +17,10 @@ class GuardrailDatabase:
         self.db_path = str(db_path)
 
         if self.db_path != ":memory:":
-            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(self.db_path).parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
 
         self.initialize()
 
@@ -76,7 +80,17 @@ class GuardrailDatabase:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (violation_id) REFERENCES violations(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS instance_error_counts (
+                    instance_id TEXT PRIMARY KEY,
+                    consecutive_errors INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL
+                );
             """)
+
+    # ---------------------------------------------------------
+    # SCANSIONI
+    # ---------------------------------------------------------
 
     def start_scan(self):
         """Registra l'inizio di una scansione e restituisce il suo ID."""
@@ -88,6 +102,7 @@ class GuardrailDatabase:
                 """,
                 (utc_now(),),
             )
+
             return cursor.lastrowid
 
     def finish_scan(
@@ -122,6 +137,31 @@ class GuardrailDatabase:
 
             if cursor.rowcount == 0:
                 raise ValueError(f"Scansione inesistente: {scan_id}")
+
+    def list_scans(self, limit=50):
+        """Restituisce le scansioni più recenti."""
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or limit < 1
+        ):
+            raise ValueError("limit deve essere un intero positivo")
+
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM scans
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+            return [dict(row) for row in rows]
+
+    # ---------------------------------------------------------
+    # VIOLAZIONI
+    # ---------------------------------------------------------
 
     def record_violation(self, violation):
         """Inserisce o aggiorna una violazione; restituisce il suo ID."""
@@ -174,6 +214,7 @@ class GuardrailDatabase:
             (str(rule), str(instance))
             for rule, instance in active_keys
         }
+
         now = utc_now()
 
         with self.connection() as conn:
@@ -199,6 +240,7 @@ class GuardrailDatabase:
                         """,
                         (now, row["id"]),
                     )
+
                     resolved += 1
 
             return resolved
@@ -225,26 +267,112 @@ class GuardrailDatabase:
 
             return [dict(row) for row in rows]
 
-    def list_scans(self, limit=50):
-        """Restituisce le scansioni più recenti."""
-        if (
-            not isinstance(limit, int)
-            or isinstance(limit, bool)
-            or limit < 1
-        ):
-            raise ValueError("limit deve essere un intero positivo")
+    # ---------------------------------------------------------
+    # PERSISTENZA ERRORI R7
+    # ---------------------------------------------------------
 
+    def update_instance_error_counts(self, instance_statuses):
+        """
+        Aggiorna i conteggi degli stati ERROR delle VM.
+
+        Incrementa il contatore se la VM è in ERROR.
+        Azzera il contatore se la VM non è in ERROR.
+        Rimuove i conteggi delle VM non più presenti nella scansione.
+        """
+        if not isinstance(instance_statuses, dict):
+            raise ValueError(
+                "instance_statuses deve essere un dizionario."
+            )
+
+        now = utc_now()
+
+        with self.connection() as conn:
+            for instance_id, status in instance_statuses.items():
+                instance_id = str(instance_id)
+
+                if not instance_id:
+                    raise ValueError(
+                        "L'ID dell'istanza non può essere vuoto."
+                    )
+
+                normalized_status = str(status or "").upper()
+
+                if normalized_status == "ERROR":
+                    conn.execute(
+                        """
+                        INSERT INTO instance_error_counts (
+                            instance_id,
+                            consecutive_errors,
+                            updated_at
+                        )
+                        VALUES (?, 1, ?)
+                        ON CONFLICT(instance_id) DO UPDATE SET
+                            consecutive_errors =
+                                instance_error_counts.consecutive_errors + 1,
+                            updated_at = excluded.updated_at
+                        """,
+                        (instance_id, now),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO instance_error_counts (
+                            instance_id,
+                            consecutive_errors,
+                            updated_at
+                        )
+                        VALUES (?, 0, ?)
+                        ON CONFLICT(instance_id) DO UPDATE SET
+                            consecutive_errors = 0,
+                            updated_at = excluded.updated_at
+                        """,
+                        (instance_id, now),
+                    )
+
+            # Elimina i conteggi delle VM non presenti nella scansione.
+            if instance_statuses:
+                placeholders = ",".join(
+                    "?" for _ in instance_statuses
+                )
+
+                conn.execute(
+                    f"""
+                    DELETE FROM instance_error_counts
+                    WHERE instance_id NOT IN ({placeholders})
+                    """,
+                    tuple(str(key) for key in instance_statuses),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM instance_error_counts"
+                )
+
+    def get_instance_error_counts(self):
+        """
+        Restituisce i conteggi persistenti delle scansioni ERROR.
+
+        Il risultato è un dizionario:
+        {
+            "vm-123": 2,
+            "vm-456": 1
+        }
+        """
         with self.connection() as conn:
             rows = conn.execute(
                 """
-                SELECT * FROM scans
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (limit,),
+                SELECT instance_id, consecutive_errors
+                FROM instance_error_counts
+                """
             ).fetchall()
 
-            return [dict(row) for row in rows]
+            return {
+                row["instance_id"]: row["consecutive_errors"]
+                for row in rows
+            }
+
+    # ---------------------------------------------------------
+    # QUARANTENA
+    # ---------------------------------------------------------
 
     def record_quarantine_event(
         self,
