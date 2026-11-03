@@ -1,9 +1,7 @@
 define_plugin guardrail-lite
 
-# Guardrail Lite services
+# Guardrail Lite main services
 enable_service guardrail
-enable_service guardrail-api
-enable_service guardrail-scheduler
 
 # Directories
 GUARDRAIL_DIR=/opt/stack/guardrail
