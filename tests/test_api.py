@@ -96,5 +96,87 @@ class TestGuardrailAPI(unittest.TestCase):
 
         controller.scan.assert_called_once()
 
+
+    def test_restore_dry_run(self):
+        controller = Mock()
+        controller.restore_instance.return_value = {
+            "event_id": 10,
+            "instance_id": "vm-123",
+            "dry_run": True,
+            "result": "dry_run",
+            "ports": [],
+        }
+
+        app = create_app(controller)
+        app.config["TESTING"] = True
+        client = app.test_client()
+
+        response = client.post("/restore/vm-123")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["result"], "dry_run")
+
+        controller.restore_instance.assert_called_once_with(
+            instance_id="vm-123",
+            dry_run=True,
+        )
+
+    def test_restore_real(self):
+        controller = Mock()
+        controller.restore_instance.return_value = {
+            "event_id": 11,
+            "instance_id": "vm-123",
+            "dry_run": False,
+            "result": "restored",
+            "ports": [],
+        }
+
+        app = create_app(controller)
+        app.config["TESTING"] = True
+        client = app.test_client()
+
+        response = client.post(
+            "/restore/vm-123",
+            json={"dry_run": False},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["result"], "restored")
+
+        controller.restore_instance.assert_called_once_with(
+            instance_id="vm-123",
+            dry_run=False,
+        )
+
+    def test_restore_invalid_dry_run(self):
+        controller = Mock()
+
+        app = create_app(controller)
+        app.config["TESTING"] = True
+        client = app.test_client()
+
+        response = client.post(
+            "/restore/vm-123",
+            json={"dry_run": "false"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        controller.restore_instance.assert_not_called()
+
+    def test_restore_controller_error(self):
+        controller = Mock()
+        controller.restore_instance.side_effect = RuntimeError(
+            "Errore di ripristino"
+        )
+
+        app = create_app(controller)
+        app.config["TESTING"] = True
+        client = app.test_client()
+
+        response = client.post("/restore/vm-123")
+
+        self.assertEqual(response.status_code, 500)
+
+
 if __name__ == "__main__":
     unittest.main()

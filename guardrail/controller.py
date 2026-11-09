@@ -164,7 +164,7 @@ class GuardrailController:
         """Restituisce la connessione OpenStack."""
 
         if self.connection is None:
-            self.connection = openstack.connect()
+            self.connection = openstack.connect(cloud="devstack-admin")
 
         return self.connection
 
@@ -344,6 +344,17 @@ class GuardrailController:
 
         return quarantine_results
 
+    def restore_instance(self, instance_id, dry_run=True):
+        """Ripristina i security group originali di un'istanza."""
+
+        if not isinstance(instance_id, str) or not instance_id.strip():
+            raise ValueError("instance_id non valido.")
+
+        return self._get_quarantine_manager().restore_instance(
+            instance_id=instance_id,
+            dry_run=dry_run,
+        )
+
     def scan(self):
         """Esegue una scansione completa delle istanze OpenStack."""
 
@@ -441,7 +452,7 @@ class GuardrailController:
 
         except Exception:
             LOG.exception(
-                "Errore durante la scansione Guardrail Lite."
+                "Errore durante la scansione Guardrail."
             )
 
             self.database.finish_scan(

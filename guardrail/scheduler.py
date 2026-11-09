@@ -9,7 +9,7 @@ LOG = logging.getLogger("guardrail.scheduler")
 
 
 class GuardrailScheduler:
-    """Gestisce le scansioni periodiche di Guardrail Lite."""
+    """Gestisce le scansioni periodiche di Guardrail."""
 
     def __init__(self, controller=None):
         self.controller = controller or GuardrailController()

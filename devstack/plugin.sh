@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Guardrail Lite DevStack plugin
+# Guardrail DevStack plugin
 
 if is_service_enabled guardrail; then
 
@@ -8,21 +8,21 @@ if is_service_enabled guardrail; then
     # INSTALL
     # ---------------------------------------------------------
     if [[ "$1" == "stack" && "$2" == "install" ]]; then
-        echo "Guardrail Lite: install phase"
+        echo "Guardrail: install phase"
 
         if [[ ! -x "$GUARDRAIL_PYTHON" ]]; then
-            die $LINENO "Guardrail Lite: Python virtual environment non trovato."
+            die $LINENO "Guardrail: Python virtual environment non trovato."
         fi
 
         "$GUARDRAIL_PYTHON" -c "import flask, openstack" || \
-            die $LINENO "Guardrail Lite: dipendenze Python mancanti."
+            die $LINENO "Guardrail: dipendenze Python mancanti."
     fi
 
     # ---------------------------------------------------------
     # POST-CONFIG
     # ---------------------------------------------------------
     if [[ "$1" == "stack" && "$2" == "post-config" ]]; then
-        echo "Guardrail Lite: post-config phase"
+        echo "Guardrail: post-config phase"
 
         install -d -o "$STACK_USER" -g "$STACK_USER" -m 0750 \
             "$GUARDRAIL_CONF_DIR" \
@@ -47,7 +47,7 @@ if is_service_enabled guardrail; then
     # EXTRA
     # ---------------------------------------------------------
     if [[ "$1" == "stack" && "$2" == "extra" ]]; then
-        echo "Guardrail Lite: extra phase"
+        echo "Guardrail: extra phase"
 
         run_process guardrail-api \
             "$GUARDRAIL_PYTHON -m guardrail.api" \
@@ -64,7 +64,7 @@ if is_service_enabled guardrail; then
     # UNSTACK
     # ---------------------------------------------------------
     if [[ "$1" == "unstack" ]]; then
-        echo "Guardrail Lite: stopping services"
+        echo "Guardrail: stopping services"
 
         stop_process guardrail-api
         stop_process guardrail-scheduler

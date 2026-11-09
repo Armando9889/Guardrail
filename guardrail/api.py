@@ -9,7 +9,7 @@ LOG = logging.getLogger("guardrail.api")
 
 
 def create_app(controller=None):
-    """Crea l'applicazione REST di Guardrail Lite."""
+    """Crea l'applicazione REST di Guardrail."""
 
     app = Flask(__name__)
 
@@ -20,7 +20,7 @@ def create_app(controller=None):
     @app.route("/health", methods=["GET"])
     def health():
         return jsonify({
-            "service": "Guardrail Lite",
+            "service": "Guardrail",
             "status": "healthy",
         }), 200
 
@@ -36,6 +36,44 @@ def create_app(controller=None):
             return jsonify({
                 "status": "failed",
                 "error": "Impossibile completare la scansione.",
+            }), 500
+
+    @app.route("/restore/<instance_id>", methods=["POST"])
+    def restore(instance_id):
+        try:
+            payload = request.get_json(silent=True)
+
+            if payload is None:
+                payload = {}
+
+            if not isinstance(payload, dict):
+                return jsonify({
+                    "error": "Il corpo della richiesta deve essere un oggetto JSON."
+                }), 400
+
+            dry_run = payload.get("dry_run", True)
+
+            if not isinstance(dry_run, bool):
+                return jsonify({
+                    "error": "dry_run deve essere un valore booleano."
+                }), 400
+
+            result = guardrail.restore_instance(
+                instance_id=instance_id,
+                dry_run=dry_run,
+            )
+
+            return jsonify(result), 200
+
+        except Exception:
+            LOG.exception(
+                "Errore durante il ripristino dell'istanza %s",
+                instance_id,
+            )
+
+            return jsonify({
+                "status": "failed",
+                "error": "Impossibile ripristinare l'istanza.",
             }), 500
 
     @app.route("/scans", methods=["GET"])
@@ -130,7 +168,7 @@ def main():
     host = os.environ.get("GUARDRAIL_API_HOST", "127.0.0.1")
     port = int(os.environ.get("GUARDRAIL_PORT", "9876"))
 
-    LOG.info("Avvio API Guardrail Lite su %s:%s", host, port)
+    LOG.info("Avvio API Guardrail su %s:%s", host, port)
 
     app.run(
         host=host,
