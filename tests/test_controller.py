@@ -28,6 +28,7 @@ class TestGuardrailController(unittest.TestCase):
             "error_scan_threshold": 3,
             "max_project_ram_mb": 8192,
             "max_project_vcpus": 8,
+            "project_limits": {},
             "auto_quarantine_rules": ["R4", "R6"],
             "quarantine_security_group": "guardrail-quarantine",
             "quarantine_dry_run": True,
@@ -83,6 +84,149 @@ class TestGuardrailController(unittest.TestCase):
             "result": "dry_run",
             "dry_run": True,
         }
+
+    def test_restore_rejects_invalid_dry_run(self):
+        invalid_values = ("false", 0, 1, None)
+
+        for value in invalid_values:
+            with self.subTest(dry_run=value):
+                self.quarantine_manager.reset_mock()
+
+                with self.assertRaises(ValueError):
+                    self.controller.restore_instance(
+                        "vm-123",
+                        dry_run=value,
+                    )
+
+                self.quarantine_manager.restore_instance.assert_not_called()
+
+    def test_project_totals_aggregate_resources_by_project(self):
+        first = self._server(instance_id="vm-1")
+        first.flavor = {"ram": 1024, "vcpus": 1}
+
+        second = self._server(instance_id="vm-2")
+        second.flavor = {"ram": 2048, "vcpus": 2}
+
+        third = self._server(instance_id="vm-3")
+        third.project_id = "project-456"
+        third.flavor = {"ram": 512, "vcpus": 1}
+
+        totals = self.controller._project_totals(
+            [first, second, third]
+        )
+
+        self.assertEqual(
+            totals,
+            {
+                "project-123": {"ram_mb": 3072, "vcpus": 3},
+                "project-456": {"ram_mb": 512, "vcpus": 1},
+            },
+        )
+
+    def test_project_totals_treat_missing_resources_as_zero(self):
+        server = self._server()
+        server.flavor = {}
+
+        totals = self.controller._project_totals([server])
+
+        self.assertEqual(
+            totals,
+            {"project-123": {"ram_mb": 0, "vcpus": 0}},
+        )
+
+    def test_project_totals_ignore_invalid_resource_values(self):
+        invalid = self._server(instance_id="vm-invalid")
+        invalid.flavor = {
+            "ram": "1024",
+            "vcpus": True,
+        }
+
+        negative = self._server(instance_id="vm-negative")
+        negative.flavor = {
+            "ram": -512,
+            "vcpus": "2",
+        }
+
+        valid = self._server(instance_id="vm-valid")
+        valid.flavor = {
+            "ram": 2048,
+            "vcpus": 2,
+        }
+
+        totals = self.controller._project_totals(
+            [invalid, negative, valid]
+        )
+
+        self.assertEqual(
+            totals,
+            {"project-123": {"ram_mb": 2048, "vcpus": 2}},
+        )
+
+    def test_project_limits_are_optional(self):
+        policy = dict(self.policy)
+        policy.pop("project_limits")
+
+        validated = GuardrailController._validate_policy(policy)
+
+        self.assertNotIn("project_limits", policy)
+        self.assertNotIn("project_limits", validated)
+
+    def test_valid_project_limits_are_accepted(self):
+        policy = dict(self.policy)
+        policy["project_limits"] = {
+            "project-1": {
+                "max_ram_mb": 8192,
+                "max_vcpus": 4,
+            },
+            "project-2": {
+                "max_ram_mb": 4096,
+            },
+        }
+
+        validated = GuardrailController._validate_policy(policy)
+
+        self.assertEqual(validated["project_limits"], policy["project_limits"])
+
+    def test_invalid_project_limits_are_rejected(self):
+        invalid_values = [
+            [],
+            {"": {"max_ram_mb": 1024}},
+            {"project-1": {}},
+            {"project-1": {"unknown_limit": 1024}},
+            {"project-1": {"max_ram_mb": 0}},
+            {"project-1": {"max_vcpus": -1}},
+            {"project-1": {"max_ram_mb": True}},
+            {"project-1": {"max_vcpus": "2"}},
+        ]
+
+        for value in invalid_values:
+            with self.subTest(project_limits=value):
+                policy = dict(self.policy)
+                policy["project_limits"] = value
+
+                with self.assertRaises(ValueError):
+                    GuardrailController._validate_policy(policy)
+
+    def test_r4_auto_quarantine_allows_empty_image_allowlist(self):
+        policy = dict(self.policy)
+        policy["allowed_image_ids"] = []
+
+        validated = GuardrailController._validate_policy(policy)
+
+        self.assertEqual(validated["allowed_image_ids"], [])
+        self.assertEqual(
+            validated["auto_quarantine_rules"],
+            ["R4", "R6"],
+        )
+
+    def test_empty_image_allowlist_allowed_without_r4_quarantine(self):
+        policy = dict(self.policy)
+        policy["allowed_image_ids"] = []
+        policy["auto_quarantine_rules"] = ["R6"]
+
+        validated = GuardrailController._validate_policy(policy)
+
+        self.assertEqual(validated["allowed_image_ids"], [])
 
     def test_r4_triggers_quarantine(self):
         server = self._server(image_id="unauthorized-image")

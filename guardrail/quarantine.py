@@ -202,44 +202,169 @@ class QuarantineManager:
         }
 
     def _load_original_security_groups(self, instance_id):
-        """Recupera dal database i gruppi originali di una VM."""
-        event = self.database.get_latest_quarantine_event(instance_id)
+        """Ricostruisce i gruppi originali dalle cronologie degli eventi."""
+        events = self.database.get_instance_quarantine_events(
+            instance_id
+        )
 
-        if event is None:
-            raise QuarantineError(
-                f"Nessun evento di quarantena trovato per la VM "
-                f"{instance_id}."
+        # Compatibilità con adapter/mock precedenti che non espongono
+        # ancora la cronologia completa.
+        if events is None:
+            event = self.database.get_latest_quarantine_event(instance_id)
+
+            if event is None:
+                raise QuarantineError(
+                    f"Nessun evento di quarantena trovato per la VM "
+                    f"{instance_id}."
+                )
+
+            if event.get("result") not in ("quarantined", "partial"):
+                raise QuarantineError(
+                    "L'ultimo evento di quarantena non contiene "
+                    "una quarantena applicata."
+                )
+
+            details = event.get("details")
+            if not isinstance(details, dict):
+                raise QuarantineError(
+                    "I dettagli dell'evento di quarantena non sono validi."
+                )
+
+            original_groups = {
+                str(port["port_id"]): port["original_security_groups"]
+                for port in details.get("ports", [])
+                if (
+                    port.get("status") == "quarantined"
+                    and port.get("port_id") is not None
+                    and isinstance(
+                        port.get("original_security_groups"), list
+                    )
+                )
+            }
+
+            restore_events = self.database.get_restore_events_after(
+                instance_id,
+                event["id"],
             )
+            for restore_event in restore_events:
+                if restore_event.get("result") not in (
+                    "restored", "partial"
+                ):
+                    continue
+                restore_details = restore_event.get("details")
+                if not isinstance(restore_details, dict):
+                    continue
+                for port in restore_details.get("ports", []):
+                    if port.get("status") == "restored":
+                        port_id = port.get("port_id")
+                        if port_id is not None:
+                            original_groups.pop(str(port_id), None)
 
-        if event.get("result") not in ("quarantined", "partial"):
-            raise QuarantineError(
-                "L'ultimo evento di quarantena non contiene "
-                "una quarantena applicata."
-            )
+        else:
+            if not isinstance(events, list):
+                raise QuarantineError(
+                    "La cronologia degli eventi di quarantena non è valida."
+                )
 
-        details = event.get("details")
+            original_groups = {}
 
-        if not isinstance(details, dict):
-            raise QuarantineError(
-                "I dettagli dell'evento di quarantena non sono validi."
-            )
+            for event in events:
+                action = event.get("action")
+                result = event.get("result")
+                details = event.get("details")
 
-        original_groups = {}
+                if not isinstance(details, dict):
+                    continue
 
-        for port in details.get("ports", []):
-            if port.get("status") not in (
-                "quarantined",
-                "already_quarantined",
-            ):
-                continue
+                ports = details.get("ports", [])
+                if not isinstance(ports, list):
+                    continue
 
-            port_id = port.get("port_id")
-            groups = port.get("original_security_groups")
+                if action == "quarantine" and result in (
+                    "quarantined", "partial"
+                ):
+                    for port in ports:
+                        if not isinstance(port, dict):
+                            continue
 
-            if port_id is None or not isinstance(groups, list):
-                continue
+                        if port.get("status") != "quarantined":
+                            continue
 
-            original_groups[str(port_id)] = groups
+                        port_id = port.get("port_id")
+                        groups = port.get("original_security_groups")
+
+                        if (
+                            port_id is None
+                            or not isinstance(groups, list)
+                            or str(port_id) in original_groups
+                        ):
+                            continue
+
+                        original_groups[str(port_id)] = groups
+
+                elif action == "quarantine" and result == "pending":
+                    quarantine_group_id = None
+
+                    for port in ports:
+                        if (
+                            not isinstance(port, dict)
+                            or port.get("status") != "pending"
+                        ):
+                            continue
+
+                        port_id = port.get("port_id")
+                        groups = port.get("original_security_groups")
+
+                        if (
+                            port_id is None
+                            or not isinstance(groups, list)
+                        ):
+                            continue
+
+                        if quarantine_group_id is None:
+                            quarantine_group_id = (
+                                self._get_quarantine_group().id
+                            )
+
+                        try:
+                            current_port = (
+                                self.connection.network.get_port(
+                                    str(port_id)
+                                )
+                            )
+                        except Exception as exc:
+                            raise QuarantineError(
+                                "Impossibile verificare lo stato della "
+                                f"porta {port_id} su Neutron."
+                            ) from exc
+
+                        if current_port is None:
+                            continue
+
+                        current_groups = (
+                            getattr(
+                                current_port,
+                                "security_group_ids",
+                                None,
+                            )
+                            or []
+                        )
+
+                        if quarantine_group_id in current_groups:
+                            original_groups[str(port_id)] = groups
+
+                elif action == "restore" and result in (
+                    "restored", "partial"
+                ):
+                    for port in ports:
+                        if (
+                            isinstance(port, dict)
+                            and port.get("status") == "restored"
+                            and port.get("port_id") is not None
+                        ):
+                            original_groups.pop(
+                                str(port["port_id"]), None
+                            )
 
         if not original_groups:
             raise QuarantineError(
@@ -249,29 +374,16 @@ class QuarantineManager:
 
         return original_groups
 
-    def restore_instance(
-        self,
-        instance_id,
-        original_security_groups=None,
-        dry_run=True,
-    ):
-        """
-        Ripristina i gruppi di sicurezza originali.
+    def restore_instance(self, instance_id, *, dry_run=True):
+        """Ripristina i gruppi originali recuperandoli dal database."""
 
-        Se original_security_groups non viene specificato, i dati
-        vengono recuperati automaticamente dal database.
-        """
+        if not isinstance(dry_run, bool):
+            raise ValueError("dry_run deve essere un valore booleano.")
+
         instance_id = str(instance_id)
-
-        if original_security_groups is None:
-            original_security_groups = (
-                self._load_original_security_groups(instance_id)
-            )
-
-        if not isinstance(original_security_groups, dict):
-            raise ValueError(
-                "original_security_groups deve essere un dizionario."
-            )
+        original_security_groups = (
+            self._load_original_security_groups(instance_id)
+        )
 
         results = []
 
@@ -343,6 +455,8 @@ class QuarantineManager:
             "ports": results,
         }
 
+        event_recorded = True
+
         try:
             event_id = self.database.record_quarantine_event(
                 instance_id=instance_id,
@@ -350,14 +464,16 @@ class QuarantineManager:
                 result=final_result,
                 details=details,
             )
-        except Exception as exc:
+        except Exception:
             LOG.exception(
                 "Impossibile registrare l'evento di ripristino."
             )
             event_id = None
+            event_recorded = False
 
         return {
             "event_id": event_id,
+            "event_recorded": event_recorded,
             "instance_id": instance_id,
             "dry_run": dry_run,
             "result": final_result,

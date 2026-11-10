@@ -108,14 +108,25 @@ def create_app(controller=None, enable_auth=False):
     def scan():
         try:
             result = guardrail.scan()
-            record_audit(
-                action="manual_scan",
-                resource="instances",
-                details={
-                    "scan_id": result.get("scan_id"),
-                    "status": result.get("status"),
-                },
-            )
+
+            try:
+                record_audit(
+                    action="manual_scan",
+                    resource="instances",
+                    details={
+                        "scan_id": result.get("scan_id"),
+                        "status": result.get("status"),
+                    },
+                )
+                result["admin_audit_recorded"] = True
+
+            except Exception:
+                LOG.exception(
+                    "Impossibile registrare l'audit amministrativo "
+                    "della scansione manuale."
+                )
+                result["admin_audit_recorded"] = False
+
             return jsonify(result), 200
 
         except Exception:
@@ -152,11 +163,25 @@ def create_app(controller=None, enable_auth=False):
                 dry_run=dry_run,
             )
 
-            record_audit(
-                action="instance_restore",
-                resource=instance_id,
-                details={"dry_run": dry_run},
-            )
+            try:
+                record_audit(
+                    action="instance_restore",
+                    resource=instance_id,
+                    details={
+                        "dry_run": dry_run,
+                        "result": result.get("result"),
+                        "event_recorded": result.get("event_recorded"),
+                    },
+                )
+                result["admin_audit_recorded"] = True
+
+            except Exception:
+                LOG.exception(
+                    "Impossibile registrare l'audit amministrativo "
+                    "del ripristino della VM %s.",
+                    instance_id,
+                )
+                result["admin_audit_recorded"] = False
 
             return jsonify(result), 200
 
@@ -377,16 +402,26 @@ def create_app(controller=None, enable_auth=False):
                 if old_policy.get(key) != payload.get(key)
             )
 
-            record_audit(
-                action="policy_update",
-                resource="guardrail_policy",
-                details={"changed_keys": changed_keys},
-            )
+            try:
+                record_audit(
+                    action="policy_update",
+                    resource="guardrail_policy",
+                    details={"changed_keys": changed_keys},
+                )
+                audit_recorded = True
+
+            except Exception:
+                LOG.exception(
+                    "Impossibile registrare l'audit amministrativo "
+                    "dell'aggiornamento della policy."
+                )
+                audit_recorded = False
 
             return jsonify({
                 "status": "updated",
                 "policy": guardrail.policy,
                 "changed_keys": changed_keys,
+                "admin_audit_recorded": audit_recorded,
             }), 200
 
         except ValueError as exc:

@@ -493,6 +493,30 @@ class GuardrailDatabase:
 
             return event
 
+    def get_instance_quarantine_events(self, instance_id):
+        """Recupera tutti gli eventi di una VM in ordine cronologico."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM quarantine_events
+                WHERE instance_id = ?
+                ORDER BY id ASC
+                """,
+                (str(instance_id),),
+            ).fetchall()
+
+            events = []
+
+            for row in rows:
+                event = dict(row)
+
+                if event["details"] is not None:
+                    event["details"] = json.loads(event["details"])
+
+                events.append(event)
+
+            return events
+
     def get_latest_quarantine_event(self, instance_id):
         """Recupera l'ultimo evento di quarantena di una VM."""
         with self.connection() as conn:
@@ -516,6 +540,39 @@ class GuardrailDatabase:
                 event["details"] = json.loads(event["details"])
 
             return event
+
+    def get_restore_events_after(self, instance_id, event_id):
+        """Recupera gli eventi restore successivi a una quarantena."""
+        if (
+            not isinstance(event_id, int)
+            or isinstance(event_id, bool)
+            or event_id < 1
+        ):
+            raise ValueError("event_id deve essere un intero positivo")
+
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM quarantine_events
+                WHERE instance_id = ?
+                  AND action = 'restore'
+                  AND id > ?
+                ORDER BY id ASC
+                """,
+                (str(instance_id), event_id),
+            ).fetchall()
+
+            events = []
+
+            for row in rows:
+                event = dict(row)
+
+                if event["details"] is not None:
+                    event["details"] = json.loads(event["details"])
+
+                events.append(event)
+
+            return events
 
     def list_quarantine_events(self, limit=50):
         """Restituisce gli eventi di quarantena più recenti."""

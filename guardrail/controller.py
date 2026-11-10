@@ -72,7 +72,8 @@ class GuardrailController:
         }
 
         missing = required - set(policy)
-        unknown = set(policy) - required
+        allowed = required | {"project_limits"}
+        unknown = set(policy) - allowed
 
         if missing:
             raise ValueError(
@@ -105,6 +106,38 @@ class GuardrailController:
                 raise ValueError(
                     f"{key} deve essere un intero positivo."
                 )
+
+        project_limits = policy.get("project_limits", {})
+
+        if not isinstance(project_limits, dict):
+            raise ValueError("project_limits deve essere un oggetto JSON.")
+
+        for project_id, limits in project_limits.items():
+            if not isinstance(project_id, str) or not project_id.strip():
+                raise ValueError("Gli ID progetto devono essere stringhe non vuote.")
+
+            if not isinstance(limits, dict) or not limits:
+                raise ValueError(
+                    f"I limiti del progetto {project_id} devono essere un oggetto non vuoto."
+                )
+
+            unknown_limits = set(limits) - {"max_ram_mb", "max_vcpus"}
+            if unknown_limits:
+                raise ValueError(
+                    f"Limiti non riconosciuti per {project_id}: "
+                    f"{sorted(unknown_limits)}"
+                )
+
+            for key, value in limits.items():
+                if (
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value < 1
+                ):
+                    raise ValueError(
+                        f"{key} del progetto {project_id} "
+                        "deve essere un intero positivo."
+                    )
 
         allowed_images = policy["allowed_image_ids"]
 
@@ -317,6 +350,16 @@ class GuardrailController:
 
         totals = {}
 
+        def valid_resource(value):
+            if (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value >= 0
+            ):
+                return value
+
+            return 0
+
         for server in servers:
             server_data = self._normalize_server(server)
 
@@ -325,8 +368,8 @@ class GuardrailController:
             if not project_id:
                 continue
 
-            ram = server_data.get("ram_mb", 0) or 0
-            vcpus = server_data.get("vcpus", 0) or 0
+            ram = valid_resource(server_data.get("ram_mb"))
+            vcpus = valid_resource(server_data.get("vcpus"))
 
             if project_id not in totals:
                 totals[project_id] = {
@@ -454,11 +497,14 @@ class GuardrailController:
 
         return quarantine_results
 
-    def restore_instance(self, instance_id, dry_run=True):
+    def restore_instance(self, instance_id, *, dry_run=True):
         """Ripristina i security group originali di un'istanza."""
 
         if not isinstance(instance_id, str) or not instance_id.strip():
             raise ValueError("instance_id non valido.")
+
+        if not isinstance(dry_run, bool):
+            raise ValueError("dry_run deve essere un valore booleano.")
 
         return self._get_quarantine_manager().restore_instance(
             instance_id=instance_id,

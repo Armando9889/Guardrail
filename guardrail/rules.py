@@ -2,6 +2,7 @@ import re
 
 
 ALLOWED_SECURITY_PROFILES = {"web", "database", "general"}
+OWNER_PATTERN = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
 
 
 def check_instance(instance, policy):
@@ -17,42 +18,62 @@ def check_instance(instance, policy):
             "instance_name": str(instance.get("name", "")),
         })
 
-    # R1: owner obbligatorio e valido.
-    metadata = instance.get("metadata") or {}
+    # R1: owner obbligatorio e conforme al formato previsto.
+    metadata = instance.get("metadata")
+
+    if not isinstance(metadata, dict):
+        metadata = {}
+
     owner = metadata.get("owner")
 
-    if not isinstance(owner, str) or not owner.strip():
-        add_violation("R1", "Metadato owner mancante o vuoto.")
+    if not isinstance(owner, str) or not OWNER_PATTERN.fullmatch(owner):
+        add_violation(
+            "R1",
+            "Metadato owner mancante o non conforme al formato previsto.",
+        )
+
+    # Limiti specifici del progetto, con fallback globali.
+    project_id = instance.get("project_id")
+    project_limits = policy.get("project_limits") or {}
+    limits = project_limits.get(project_id, {})
 
     # R2: limite di RAM per singola VM.
     ram_mb = instance.get("ram_mb")
-    max_ram_mb = policy.get("max_ram_mb")
+    max_ram_mb = limits.get("max_ram_mb", policy.get("max_ram_mb"))
 
     if (
         isinstance(ram_mb, int)
         and not isinstance(ram_mb, bool)
         and isinstance(max_ram_mb, int)
+        and not isinstance(max_ram_mb, bool)
         and ram_mb > max_ram_mb
     ):
-        add_violation("R2", f"RAM {ram_mb} MB superiore al limite {max_ram_mb} MB.")
+        add_violation(
+            "R2",
+            f"RAM {ram_mb} MB superiore al limite {max_ram_mb} MB.",
+        )
 
     # R3: limite di vCPU per singola VM.
     vcpus = instance.get("vcpus")
-    max_vcpus = policy.get("max_vcpus")
+    max_vcpus = limits.get("max_vcpus", policy.get("max_vcpus"))
 
     if (
         isinstance(vcpus, int)
         and not isinstance(vcpus, bool)
         and isinstance(max_vcpus, int)
+        and not isinstance(max_vcpus, bool)
         and vcpus > max_vcpus
     ):
-        add_violation("R3", f"vCPU {vcpus} superiore al limite {max_vcpus}.")
+        add_violation(
+            "R3",
+            f"vCPU {vcpus} superiore al limite {max_vcpus}.",
+        )
 
     # R4: immagine presente nella allowlist.
     image_id = instance.get("image_id")
     allowed_images = policy.get("allowed_image_ids", [])
 
-    if image_id not in allowed_images:
+    if allowed_images and image_id not in allowed_images:
         add_violation(
             "R4",
             f"Immagine {image_id!r} non presente nella lista autorizzata.",
@@ -61,7 +82,10 @@ def check_instance(instance, policy):
 
     # R5: nome conforme al pattern configurato.
     name = instance.get("name") or ""
-    name_pattern = policy.get("name_pattern", r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+    name_pattern = policy.get(
+        "name_pattern",
+        r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+    )
     max_name_length = policy.get("max_name_length", 50)
 
     try:
@@ -79,7 +103,10 @@ def check_instance(instance, policy):
     # R6: profilo di sicurezza ammesso.
     profile = metadata.get("security_profile")
 
-    if profile not in ALLOWED_SECURITY_PROFILES:
+    if (
+        not isinstance(profile, str)
+        or profile not in ALLOWED_SECURITY_PROFILES
+    ):
         add_violation(
             "R6",
             "security_profile mancante o non valido.",
@@ -100,36 +127,6 @@ def check_instance(instance, policy):
             "R7",
             f"VM in stato ERROR per {error_count} scansioni consecutive.",
             severity="high",
-        )
-
-    # R8: superamento dei limiti aggregati del progetto.
-    project_ram_mb = instance.get("project_ram_mb")
-    project_vcpus = instance.get("project_vcpus")
-    max_project_ram_mb = policy.get("max_project_ram_mb")
-    max_project_vcpus = policy.get("max_project_vcpus")
-
-    if (
-        isinstance(project_ram_mb, int)
-        and not isinstance(project_ram_mb, bool)
-        and isinstance(max_project_ram_mb, int)
-        and project_ram_mb > max_project_ram_mb
-    ):
-        add_violation(
-            "R8",
-            f"RAM complessiva del progetto {project_ram_mb} MB "
-            f"superiore al limite {max_project_ram_mb} MB.",
-        )
-
-    if (
-        isinstance(project_vcpus, int)
-        and not isinstance(project_vcpus, bool)
-        and isinstance(max_project_vcpus, int)
-        and project_vcpus > max_project_vcpus
-    ):
-        add_violation(
-            "R8",
-            f"vCPU complessive del progetto {project_vcpus} "
-            f"superiori al limite {max_project_vcpus}.",
         )
 
     return violations
