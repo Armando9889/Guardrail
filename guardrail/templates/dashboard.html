@@ -68,6 +68,23 @@ main { flex: 1; min-width: 0; padding: 30px 36px 45px; }
 h1 { margin: 0; font-size: 25px; letter-spacing: -.7px; }
 .description { color: var(--muted); font-size: 13px; margin-top: 7px; }
 .actions { display: flex; align-items: center; gap: 12px; }
+.auth-panel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.auth-panel input {
+    width: 190px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+.auth-status {
+    font-size: 11px;
+    color: var(--muted);
+}
+
 button {
     border: 0;
     background: var(--blue);
@@ -188,7 +205,15 @@ tbody tr:last-child td { border-bottom: 0; }
         </div>
         <div class="actions">
             <span class="refresh" id="last-refresh">Aggiornamento in attesa</span>
-            <button id="scan-button" onclick="manualScan()">Avvia scansione</button>
+            <div class="auth-panel">
+                <input id="token-input" type="password"
+                    placeholder="Token Keystone" autocomplete="off">
+                <button id="auth-button" onclick="authenticate()">Accedi</button>
+                <span class="auth-status" id="auth-status">Non autenticato</span>
+            </div>
+            <button id="scan-button" onclick="manualScan()" hidden>
+                Avvia scansione
+            </button>
         </div>
     </header>
 
@@ -317,11 +342,134 @@ function badge(value) {
     return `<span class="badge ${cls}">${escapeHtml(text)}</span>`;
 }
 
+let isAdmin = false;
+
+function clearAuthentication(message = "Non autenticato") {
+    sessionStorage.removeItem("guardrail_token");
+    isAdmin = false;
+    $("token-input").value = "";
+    $("token-input").disabled = false;
+    $("auth-button").textContent = "Accedi";
+    $("auth-status").textContent = message;
+    $("scan-button").hidden = true;
+
+    const placeholders = {
+        "scans-count": "—",
+        "open-count": "—",
+        "resolved-count": "—",
+        "events-count": "—",
+        "api-detail": "Autenticazione richiesta",
+        "scheduler-status": "—",
+        "last-auto": "—",
+        "next-auto": "—",
+        "interval": "—",
+        "dry-run": "—",
+        "violation-total": "0 record",
+        "last-refresh": "Aggiornamento in attesa"
+    };
+
+    for (const [id, value] of Object.entries(placeholders)) {
+        $(id).textContent = value;
+    }
+
+    $("api-status").className = "badge";
+    $("api-status").textContent = "AUTENTICAZIONE";
+
+    $("recent-scans").innerHTML =
+        '<tr><td colspan="4" class="empty">Autenticazione richiesta</td></tr>';
+
+    $("violations-table").innerHTML =
+        '<tr><td colspan="6" class="empty">Autenticazione richiesta</td></tr>';
+
+    $("events-table").innerHTML =
+        '<tr><td colspan="4" class="empty">Autenticazione richiesta</td></tr>';
+}
+
+async function apiFetch(url, options = {}) {
+    const token = sessionStorage.getItem("guardrail_token");
+
+    if (!token) {
+        throw new Error("Autenticazione richiesta.");
+    }
+
+    const headers = new Headers(options.headers || {});
+    headers.set("X-Auth-Token", token);
+
+    const response = await fetch(url, {
+        ...options,
+        headers
+    });
+
+    if (response.status === 401) {
+        clearAuthentication("Sessione scaduta");
+        throw new Error("Token Keystone non valido o scaduto.");
+    }
+
+    return response;
+}
+
+async function authenticate() {
+    const existingToken = sessionStorage.getItem("guardrail_token");
+
+    if (existingToken) {
+        clearAuthentication();
+        $("api-status").className = "badge";
+        $("api-status").textContent = "AUTENTICAZIONE";
+        $("api-detail").textContent = "Autenticazione terminata";
+        return;
+    }
+
+    const token = $("token-input").value.trim();
+
+    if (!token) {
+        $("auth-status").textContent = "Inserire un token Keystone";
+        return;
+    }
+
+    $("auth-button").disabled = true;
+    $("auth-status").textContent = "Verifica in corso...";
+
+    try {
+        sessionStorage.setItem("guardrail_token", token);
+
+        const response = await apiFetch("/auth-info");
+
+        if (!response.ok) {
+            throw new Error("Autenticazione non riuscita.");
+        }
+
+        const identity = await response.json();
+
+        isAdmin = identity.is_admin === true;
+        $("token-input").value = "";
+        $("token-input").disabled = true;
+        $("auth-button").textContent = "Esci";
+        $("auth-status").textContent =
+            identity.user_name + (isAdmin ? " · Admin" : " · Utente");
+        $("scan-button").hidden = !isAdmin;
+
+        await refreshDashboard();
+
+    } catch (error) {
+        clearAuthentication("Accesso non riuscito");
+        $("api-detail").textContent = error.message;
+    } finally {
+        $("auth-button").disabled = false;
+    }
+}
+
 async function refreshDashboard() {
+    if (!sessionStorage.getItem("guardrail_token")) {
+        $("api-status").className = "badge";
+        $("api-status").textContent = "AUTENTICAZIONE";
+        $("api-detail").textContent = "Inserire un token Keystone";
+        return;
+    }
+
     try {
         const [healthResponse, dataResponse] = await Promise.all([
             fetch("/health"),
-            fetch("/dashboard-data")
+            apiFetch("/dashboard-data")
         ]);
 
         if (!healthResponse.ok || !dataResponse.ok) {
@@ -392,8 +540,48 @@ async function refreshDashboard() {
             '<tr><td colspan="4" class="empty">Nessun evento registrato</td></tr>';
 
     } catch (error) {
-        $("api-status").className = "badge red";
-        $("api-status").textContent = "OFFLINE";
+        if (!sessionStorage.getItem("guardrail_token")) {
+            $("api-status").className = "badge";
+            $("api-status").textContent = "AUTENTICAZIONE";
+        } else {
+            $("api-status").className = "badge red";
+            $("api-status").textContent = "OFFLINE";
+        }
+        $("api-detail").textContent = error.message;
+    }
+}
+
+async function initializeDashboard() {
+    const token = sessionStorage.getItem("guardrail_token");
+
+    if (!token) {
+        await refreshDashboard();
+        return;
+    }
+
+    $("token-input").disabled = true;
+    $("auth-button").textContent = "Esci";
+    $("auth-status").textContent = "Verifica sessione...";
+
+    try {
+        const response = await apiFetch("/auth-info");
+
+        if (!response.ok) {
+            throw new Error("Sessione non valida.");
+        }
+
+        const identity = await response.json();
+
+        isAdmin = identity.is_admin === true;
+        $("auth-status").textContent =
+            identity.user_name + (isAdmin ? " · Admin" : " · Utente");
+        $("scan-button").hidden = !isAdmin;
+
+        await refreshDashboard();
+    } catch (error) {
+        clearAuthentication("Sessione scaduta");
+        $("api-status").className = "badge";
+        $("api-status").textContent = "AUTENTICAZIONE";
         $("api-detail").textContent = error.message;
     }
 }
@@ -404,7 +592,7 @@ async function manualScan() {
     button.textContent = "Scansione in corso...";
 
     try {
-        const response = await fetch("/scan", { method: "POST" });
+        const response = await apiFetch("/scan", { method: "POST" });
         const result = await response.json();
 
         if (!response.ok) {
@@ -424,7 +612,7 @@ async function manualScan() {
     }
 }
 
-refreshDashboard();
+initializeDashboard();
 setInterval(refreshDashboard, 15000);
 </script>
 </body>

@@ -14,7 +14,7 @@ if is_service_enabled guardrail; then
             die $LINENO "Guardrail: Python virtual environment non trovato."
         fi
 
-        "$GUARDRAIL_PYTHON" -c "import flask, openstack" || \
+        "$GUARDRAIL_PYTHON" -c "import flask, openstack; from keystonemiddleware.auth_token import AuthProtocol" || \
             die $LINENO "Guardrail: dipendenze Python mancanti."
     fi
 

@@ -1,5 +1,6 @@
 import logging
 import os
+from functools import wraps
 from datetime import datetime, timedelta, timezone
 
 from flask import Flask, jsonify, request, render_template
@@ -9,7 +10,21 @@ from guardrail.controller import GuardrailController
 LOG = logging.getLogger("guardrail.api")
 
 
-def create_app(controller=None):
+class PublicEndpointsMiddleware:
+    """Lascia pubblici solo gli endpoint esplicitamente consentiti."""
+
+    def __init__(self, authenticated_app, public_app):
+        self.authenticated_app = authenticated_app
+        self.public_app = public_app
+
+    def __call__(self, environ, start_response):
+        path = environ.get("PATH_INFO", "")
+        if path in ("/", "/health"):
+            return self.public_app(environ, start_response)
+        return self.authenticated_app(environ, start_response)
+
+
+def create_app(controller=None, enable_auth=False):
     """Crea l'applicazione REST di Guardrail."""
 
     app = Flask(__name__)
@@ -17,6 +32,53 @@ def create_app(controller=None):
     guardrail = controller or GuardrailController()
 
     app.config["GUARDRAIL_CONTROLLER"] = guardrail
+    app.config["AUTH_ENABLED"] = enable_auth
+
+    def require_identity(admin=False):
+        """Verifica l'identità Keystone e, se richiesto, il ruolo admin."""
+
+        def decorator(view):
+            @wraps(view)
+            def wrapped(*args, **kwargs):
+                if not app.config["AUTH_ENABLED"]:
+                    return view(*args, **kwargs)
+
+                identity_status = request.headers.get("X-Identity-Status")
+                user_id = request.headers.get("X-User-Id")
+
+                if identity_status != "Confirmed" or not user_id:
+                    return jsonify({
+                        "error": "Autenticazione Keystone richiesta."
+                    }), 401
+
+                if admin:
+                    roles = {
+                        role.strip().lower()
+                        for role in request.headers.get("X-Roles", "").split(",")
+                    }
+                    if "admin" not in roles:
+                        return jsonify({
+                            "error": "È richiesto il ruolo admin."
+                        }), 403
+
+                return view(*args, **kwargs)
+
+            return wrapped
+        return decorator
+
+    def record_audit(action, resource, details=None):
+        """Registra un'operazione amministrativa senza salvare il token."""
+
+        user_id = request.headers.get("X-User-Id")
+        user_name = request.headers.get("X-User-Name") or user_id
+
+        guardrail.database.record_admin_audit_event(
+            actor_id=user_id,
+            actor_name=user_name,
+            action=action,
+            resource=resource,
+            details=details,
+        )
 
     @app.route("/health", methods=["GET"])
     def health():
@@ -25,10 +87,35 @@ def create_app(controller=None):
             "status": "healthy",
         }), 200
 
+    @app.route("/auth-info", methods=["GET"])
+    @require_identity()
+    def auth_info():
+        """Restituisce le informazioni essenziali dell'utente autenticato."""
+        roles = {
+            role.strip().lower()
+            for role in request.headers.get("X-Roles", "").split(",")
+        }
+
+        return jsonify({
+            "authenticated": True,
+            "user_name": request.headers.get("X-User-Name") or "Utente",
+            "is_admin": "admin" in roles,
+        }), 200
+
+
     @app.route("/scan", methods=["POST"])
+    @require_identity(admin=True)
     def scan():
         try:
             result = guardrail.scan()
+            record_audit(
+                action="manual_scan",
+                resource="instances",
+                details={
+                    "scan_id": result.get("scan_id"),
+                    "status": result.get("status"),
+                },
+            )
             return jsonify(result), 200
 
         except Exception:
@@ -40,6 +127,7 @@ def create_app(controller=None):
             }), 500
 
     @app.route("/restore/<instance_id>", methods=["POST"])
+    @require_identity(admin=True)
     def restore(instance_id):
         try:
             payload = request.get_json(silent=True)
@@ -64,6 +152,12 @@ def create_app(controller=None):
                 dry_run=dry_run,
             )
 
+            record_audit(
+                action="instance_restore",
+                resource=instance_id,
+                details={"dry_run": dry_run},
+            )
+
             return jsonify(result), 200
 
         except Exception:
@@ -78,6 +172,7 @@ def create_app(controller=None):
             }), 500
 
     @app.route("/scans", methods=["GET"])
+    @require_identity()
     def scans():
         try:
             limit = request.args.get("limit", default=50, type=int)
@@ -102,6 +197,7 @@ def create_app(controller=None):
             }), 500
 
     @app.route("/violations", methods=["GET"])
+    @require_identity()
     def violations():
         try:
             status = request.args.get("status")
@@ -126,6 +222,7 @@ def create_app(controller=None):
             }), 500
 
     @app.route("/quarantine-events", methods=["GET"])
+    @require_identity()
     def quarantine_events():
         try:
             limit = request.args.get("limit", default=50, type=int)
@@ -160,6 +257,7 @@ def create_app(controller=None):
         return render_template("dashboard.html")
 
     @app.route("/dashboard-data", methods=["GET"])
+    @require_identity()
     def dashboard_data():
         """Restituisce i dati aggregati per la dashboard."""
         try:
@@ -248,6 +346,83 @@ def create_app(controller=None):
                 "error": "Impossibile recuperare i dati della dashboard."
             }), 500
 
+    @app.route("/policy", methods=["GET"])
+    @require_identity()
+    def get_policy():
+        try:
+            policy = guardrail.reload_policy()
+            return jsonify({"policy": policy}), 200
+        except Exception:
+            LOG.exception("Errore durante il recupero della policy")
+            return jsonify({
+                "error": "Impossibile recuperare la policy."
+            }), 500
+
+    @app.route("/policy", methods=["PUT"])
+    @require_identity(admin=True)
+    def update_policy():
+        try:
+            payload = request.get_json(silent=True)
+
+            if not isinstance(payload, dict):
+                return jsonify({
+                    "error": "Il corpo della richiesta deve essere un oggetto JSON."
+                }), 400
+
+            old_policy = dict(guardrail.policy)
+            guardrail.save_policy(payload)
+
+            changed_keys = sorted(
+                key for key in payload
+                if old_policy.get(key) != payload.get(key)
+            )
+
+            record_audit(
+                action="policy_update",
+                resource="guardrail_policy",
+                details={"changed_keys": changed_keys},
+            )
+
+            return jsonify({
+                "status": "updated",
+                "policy": guardrail.policy,
+                "changed_keys": changed_keys,
+            }), 200
+
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception:
+            LOG.exception("Errore durante l'aggiornamento della policy")
+            return jsonify({
+                "error": "Impossibile aggiornare la policy."
+            }), 500
+
+    @app.route("/audit-events", methods=["GET"])
+    @require_identity(admin=True)
+    def audit_events():
+        try:
+            limit = request.args.get("limit", default=50, type=int)
+
+            if limit < 1 or limit > 500:
+                return jsonify({
+                    "error": "Il parametro limit deve essere tra 1 e 500."
+                }), 400
+
+            events = guardrail.database.list_admin_audit_events(
+                limit=limit
+            )
+
+            return jsonify({
+                "audit_events": events,
+                "count": len(events),
+            }), 200
+
+        except Exception:
+            LOG.exception("Errore durante il recupero degli eventi audit")
+            return jsonify({
+                "error": "Impossibile recuperare gli eventi audit."
+            }), 500
+
     return app
 
 
@@ -259,7 +434,22 @@ def main():
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    app = create_app()
+    app = create_app(enable_auth=True)
+
+    from keystonemiddleware.auth_token import AuthProtocol
+
+    authenticated_app = AuthProtocol(
+        app.wsgi_app,
+        {
+            "oslo_config_project": "nova",
+            "oslo_config_file": "/etc/nova/nova.conf",
+        },
+    )
+
+    app.wsgi_app = PublicEndpointsMiddleware(
+        authenticated_app,
+        app.wsgi_app,
+    )
 
     host = os.environ.get("GUARDRAIL_API_HOST", "127.0.0.1")
     port = int(os.environ.get("GUARDRAIL_PORT", "9876"))

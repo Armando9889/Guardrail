@@ -1,6 +1,9 @@
 import json
 import logging
 import os
+import re
+import stat
+import tempfile
 from pathlib import Path
 
 import openstack
@@ -46,6 +49,121 @@ class GuardrailController:
         self.connection = connection
         self.quarantine_manager = quarantine_manager
 
+    @staticmethod
+    def _validate_policy(policy):
+        """Valida tutti i parametri della policy Guardrail."""
+
+        if not isinstance(policy, dict):
+            raise ValueError("La policy deve essere un oggetto JSON.")
+
+        required = {
+            "scan_interval_seconds",
+            "max_ram_mb",
+            "max_vcpus",
+            "allowed_image_ids",
+            "name_pattern",
+            "max_name_length",
+            "error_scan_threshold",
+            "max_project_ram_mb",
+            "max_project_vcpus",
+            "auto_quarantine_rules",
+            "quarantine_security_group",
+            "quarantine_dry_run",
+        }
+
+        missing = required - set(policy)
+        unknown = set(policy) - required
+
+        if missing:
+            raise ValueError(
+                "Parametri mancanti: " + ", ".join(sorted(missing))
+            )
+
+        if unknown:
+            raise ValueError(
+                "Parametri non riconosciuti: " + ", ".join(sorted(unknown))
+            )
+
+        numeric_settings = (
+            "scan_interval_seconds",
+            "max_ram_mb",
+            "max_vcpus",
+            "max_project_ram_mb",
+            "max_project_vcpus",
+            "max_name_length",
+            "error_scan_threshold",
+        )
+
+        for key in numeric_settings:
+            value = policy[key]
+
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value < 1
+            ):
+                raise ValueError(
+                    f"{key} deve essere un intero positivo."
+                )
+
+        allowed_images = policy["allowed_image_ids"]
+
+        if not isinstance(allowed_images, list):
+            raise ValueError("allowed_image_ids deve essere una lista.")
+
+        if any(
+            not isinstance(image_id, str) or not image_id.strip()
+            for image_id in allowed_images
+        ):
+            raise ValueError(
+                "Gli ID delle immagini devono essere stringhe non vuote."
+            )
+
+        pattern = policy["name_pattern"]
+
+        if not isinstance(pattern, str) or not pattern:
+            raise ValueError("name_pattern deve essere una stringa non vuota.")
+
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError(f"name_pattern non valida: {exc}") from exc
+
+        auto_rules = policy["auto_quarantine_rules"]
+        valid_rules = {
+            "R1", "R2", "R3", "R4",
+            "R5", "R6", "R7", "R8",
+        }
+
+        if not isinstance(auto_rules, list):
+            raise ValueError("auto_quarantine_rules deve essere una lista.")
+
+        if any(
+            not isinstance(rule, str) or rule not in valid_rules
+            for rule in auto_rules
+        ):
+            raise ValueError(
+                "auto_quarantine_rules contiene una regola non valida."
+            )
+
+        security_group = policy["quarantine_security_group"]
+
+        if (
+            not isinstance(security_group, str)
+            or not security_group.strip()
+        ):
+            raise ValueError(
+                "quarantine_security_group deve essere una stringa non vuota."
+            )
+
+        # La modalità dry-run non può essere disattivata dalla policy API.
+        if policy["quarantine_dry_run"] is not True:
+            raise ValueError(
+                "quarantine_dry_run deve rimanere true."
+            )
+
+        return dict(policy)
+
     def _load_policy(self):
         """Carica e valida la configurazione JSON."""
 
@@ -58,68 +176,56 @@ class GuardrailController:
                 f"Impossibile leggere la policy {self.config_path}: {exc}"
             ) from exc
 
-        if not isinstance(policy, dict):
-            raise ValueError("La policy deve essere un oggetto JSON.")
+        return self._validate_policy(policy)
 
-        allowed_images = policy.get("allowed_image_ids")
+    def reload_policy(self):
+        """Ricarica la policy dal file di configurazione."""
+        self.policy = self._load_policy()
+        return dict(self.policy)
 
-        if not isinstance(allowed_images, list):
-            raise ValueError("allowed_image_ids deve essere una lista.")
+    def save_policy(self, policy):
+        """Valida e salva la policy tramite sostituzione atomica."""
 
-        for image_id in allowed_images:
-            if not isinstance(image_id, str) or not image_id:
-                raise ValueError(
-                    "Ogni elemento di allowed_image_ids deve "
-                    "essere una stringa non vuota."
-                )
+        validated = self._validate_policy(policy)
 
-        numeric_settings = (
-            "max_ram_mb",
-            "max_vcpus",
-            "max_project_ram_mb",
-            "max_project_vcpus",
-            "max_name_length",
-            "error_scan_threshold",
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        current_mode = (
+            stat.S_IMODE(self.config_path.stat().st_mode)
+            if self.config_path.exists()
+            else 0o640
         )
 
-        for key in numeric_settings:
-            value = policy.get(key)
+        fd, temporary_path = tempfile.mkstemp(
+            prefix=".guardrail-policy-",
+            suffix=".json",
+            dir=str(self.config_path.parent),
+        )
 
-            if (
-                not isinstance(value, int)
-                or isinstance(value, bool)
-                or value < 1
-            ):
-                raise ValueError(
-                    f"La policy deve contenere un intero positivo per {key}."
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                json.dump(
+                    validated,
+                    file,
+                    indent=2,
+                    ensure_ascii=False,
                 )
+                file.write("\n")
+                file.flush()
+                os.fsync(file.fileno())
 
-        auto_rules = policy.get("auto_quarantine_rules", [])
+            os.chmod(temporary_path, current_mode)
+            os.replace(temporary_path, self.config_path)
 
-        if not isinstance(auto_rules, list):
-            raise ValueError(
-                "auto_quarantine_rules deve essere una lista."
-            )
+        except Exception:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
+            raise
 
-        valid_rules = {
-            "R1", "R2", "R3", "R4",
-            "R5", "R6", "R7", "R8",
-        }
-
-        if any(
-            not isinstance(rule, str) or rule not in valid_rules
-            for rule in auto_rules
-        ):
-            raise ValueError(
-                "auto_quarantine_rules contiene una regola non valida."
-            )
-
-        if not isinstance(policy.get("quarantine_dry_run"), bool):
-            raise ValueError(
-                "quarantine_dry_run deve essere un valore booleano."
-            )
-
-        return policy
+        self.policy = validated
+        return dict(self.policy)
 
     @staticmethod
     def _server_to_dict(server):
@@ -361,6 +467,9 @@ class GuardrailController:
 
     def scan(self, source="manual"):
         """Esegue una scansione completa delle istanze OpenStack."""
+
+        # Rileva anche le modifiche effettuate dall'API o da altri processi.
+        self.reload_policy()
 
         scan_id = self.database.start_scan(source=source)
 

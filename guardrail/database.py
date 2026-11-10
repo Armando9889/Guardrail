@@ -87,6 +87,16 @@ class GuardrailDatabase:
                     consecutive_errors INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS admin_audit_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    actor_id TEXT NOT NULL,
+                    actor_name TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    resource TEXT NOT NULL,
+                    details TEXT,
+                    created_at TEXT NOT NULL
+                );
             """)
 
             columns = {
@@ -527,3 +537,75 @@ class GuardrailDatabase:
             ).fetchall()
 
             return [dict(row) for row in rows]
+
+
+    # ---------------------------------------------------------
+    # AUDIT AMMINISTRATIVO
+    # ---------------------------------------------------------
+
+    def record_admin_audit_event(
+        self,
+        actor_id,
+        actor_name,
+        action,
+        resource,
+        details=None,
+    ):
+        """Registra un'operazione amministrativa."""
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (actor_id, actor_name, action, resource)
+        ):
+            raise ValueError("I campi dell'evento audit sono obbligatori.")
+
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO admin_audit_events (
+                    actor_id, actor_name, action,
+                    resource, details, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    actor_id,
+                    actor_name,
+                    action,
+                    resource,
+                    json.dumps(details) if details is not None else None,
+                    utc_now(),
+                ),
+            )
+
+            return cursor.lastrowid
+
+    def list_admin_audit_events(self, limit=50):
+        """Restituisce gli eventi amministrativi più recenti."""
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or not 1 <= limit <= 500
+        ):
+            raise ValueError("limit deve essere compreso tra 1 e 500.")
+
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM admin_audit_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+            events = []
+
+            for row in rows:
+                event = dict(row)
+
+                if event["details"] is not None:
+                    event["details"] = json.loads(event["details"])
+
+                events.append(event)
+
+            return events
