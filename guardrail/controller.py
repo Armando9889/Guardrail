@@ -287,6 +287,10 @@ class GuardrailController:
         for violation in violations:
             rule = violation.get("rule")
 
+            # R8 riguarda il progetto, non una singola VM.
+            if rule == "R8":
+                continue
+
             if rule not in auto_rules:
                 continue
 
@@ -383,11 +387,12 @@ class GuardrailController:
                         "rule": "R8",
                         "message": (
                             f"Il progetto {project_id} supera "
-                            "il limite aggregato di RAM."
+                            f"il limite aggregato di RAM: "
+                            f"{totals['ram_mb']} MB."
                         ),
                         "severity": "WARNING",
-                        "instance_id": None,
-                        "instance_name": None,
+                        "instance_id": f"project:{project_id}:ram",
+                        "instance_name": f"[PROJECT] {project_id} (RAM)",
                         "scan_id": scan_id,
                     })
 
@@ -399,11 +404,12 @@ class GuardrailController:
                         "rule": "R8",
                         "message": (
                             f"Il progetto {project_id} supera "
-                            "il limite aggregato di vCPU."
+                            f"il limite aggregato di vCPU: "
+                            f"{totals['vcpus']}."
                         ),
                         "severity": "WARNING",
-                        "instance_id": None,
-                        "instance_name": None,
+                        "instance_id": f"project:{project_id}:vcpus",
+                        "instance_name": f"[PROJECT] {project_id} (vCPU)",
                         "scan_id": scan_id,
                     })
 

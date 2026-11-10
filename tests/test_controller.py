@@ -163,6 +163,124 @@ class TestGuardrailController(unittest.TestCase):
                 db_path=str(self.temp_path / "invalid.db"),
                 connection=self.connection,
             )
+
+    def test_r8_violations_are_persisted_separately(self):
+        server = self._server()
+        server.flavor = {
+            "id": "flavor-1",
+            "ram": 9216,
+            "vcpus": 9,
+        }
+
+        self._prepare_scan([server])
+
+        result = self.controller.scan()
+
+        r8_violations = [
+            violation
+            for violation in result["violations"]
+            if violation["rule"] == "R8"
+        ]
+
+        self.assertEqual(len(r8_violations), 2)
+
+        instance_ids = {
+            violation["instance_id"]
+            for violation in r8_violations
+        }
+
+        self.assertEqual(
+            instance_ids,
+            {
+                "project:project-123:ram",
+                "project:project-123:vcpus",
+            },
+        )
+
+        stored = [
+            violation
+            for violation in self.controller.database.list_violations()
+            if violation["rule_id"] == "R8"
+        ]
+
+        self.assertEqual(len(stored), 2)
+        self.assertEqual(
+            {violation["instance_id"] for violation in stored},
+            instance_ids,
+        )
+        self.assertTrue(
+            all(violation["status"] == "open" for violation in stored)
+        )
+
+        self.quarantine_manager.quarantine_instance.assert_not_called()
+
+    def test_r8_violations_are_resolved_when_project_is_compliant(self):
+        server = self._server()
+        server.flavor = {
+            "id": "flavor-1",
+            "ram": 9216,
+            "vcpus": 9,
+        }
+
+        self._prepare_scan([server])
+        first_result = self.controller.scan()
+
+        self.assertEqual(
+            len([
+                violation
+                for violation in first_result["violations"]
+                if violation["rule"] == "R8"
+            ]),
+            2,
+        )
+
+        server.flavor = {
+            "id": "flavor-1",
+            "ram": 1024,
+            "vcpus": 1,
+        }
+
+        second_result = self.controller.scan()
+
+        self.assertEqual(second_result["status"], "completed")
+
+        stored = [
+            violation
+            for violation in self.controller.database.list_violations()
+            if violation["rule_id"] == "R8"
+        ]
+
+        self.assertEqual(len(stored), 2)
+        self.assertTrue(
+            all(violation["status"] == "resolved" for violation in stored)
+        )
+
+    def test_r8_never_triggers_quarantine(self):
+        self.policy["auto_quarantine_rules"] = ["R8"]
+        self._write_config()
+
+        controller = GuardrailController(
+            config_path=self.config_path,
+            db_path=str(self.db_path),
+            connection=self.connection,
+            quarantine_manager=self.quarantine_manager,
+        )
+
+        server = self._server()
+        server.flavor = {
+            "id": "flavor-1",
+            "ram": 9216,
+            "vcpus": 9,
+        }
+
+        self._prepare_scan([server])
+
+        result = controller.scan()
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["quarantine_results"], [])
+        self.quarantine_manager.quarantine_instance.assert_not_called()
+
     def test_r7_persists_after_controller_restart(self):
         # Prima scansione: la VM è in ERROR.
         server = self._server(status="ERROR")
