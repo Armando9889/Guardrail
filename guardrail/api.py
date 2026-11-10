@@ -1,7 +1,8 @@
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 
 from guardrail.controller import GuardrailController
 
@@ -150,6 +151,101 @@ def create_app(controller=None):
 
             return jsonify({
                 "error": "Impossibile recuperare gli eventi di quarantena."
+            }), 500
+
+
+    @app.route("/", methods=["GET"])
+    def dashboard():
+        """Mostra la dashboard web di Guardrail."""
+        return render_template("dashboard.html")
+
+    @app.route("/dashboard-data", methods=["GET"])
+    def dashboard_data():
+        """Restituisce i dati aggregati per la dashboard."""
+        try:
+            scans = guardrail.database.list_scans(limit=100)
+            violations = guardrail.database.list_violations()
+            events = guardrail.database.list_quarantine_events(limit=50)
+
+            interval = guardrail.policy.get(
+                "scan_interval_seconds", 300
+            )
+
+            automatic_scans = [
+                scan for scan in scans
+                if scan.get("source") == "automatic"
+            ]
+
+            latest_auto = automatic_scans[0] if automatic_scans else None
+            last_auto_time = None
+            next_auto_time = None
+            scheduler_status = "waiting"
+
+            if latest_auto:
+                timestamp = (
+                    latest_auto.get("completed_at")
+                    or latest_auto.get("started_at")
+                )
+
+                if timestamp:
+                    last_auto_time = datetime.fromisoformat(
+                        timestamp.replace("Z", "+00:00")
+                    )
+
+                    if last_auto_time.tzinfo is None:
+                        last_auto_time = last_auto_time.replace(
+                            tzinfo=timezone.utc
+                        )
+
+                    next_auto_time = last_auto_time + timedelta(
+                        seconds=interval
+                    )
+
+                    age = (
+                        datetime.now(timezone.utc) - last_auto_time
+                    ).total_seconds()
+
+                    scheduler_status = (
+                        "active" if age <= interval * 2 else "stale"
+                    )
+
+            return jsonify({
+                "scans": scans,
+                "violations": violations,
+                "quarantine_events": events,
+                "summary": {
+                    "scans_count": len(scans),
+                    "violations_open": sum(
+                        1 for item in violations
+                        if item.get("status") == "open"
+                    ),
+                    "violations_resolved": sum(
+                        1 for item in violations
+                        if item.get("status") == "resolved"
+                    ),
+                    "quarantine_events_count": len(events),
+                },
+                "scheduler": {
+                    "status": scheduler_status,
+                    "interval_seconds": interval,
+                    "last_automatic_scan": (
+                        last_auto_time.isoformat()
+                        if last_auto_time else None
+                    ),
+                    "next_automatic_scan": (
+                        next_auto_time.isoformat()
+                        if next_auto_time else None
+                    ),
+                },
+                "dry_run": guardrail.policy.get(
+                    "quarantine_dry_run", True
+                ),
+            }), 200
+
+        except Exception:
+            LOG.exception("Errore durante il recupero dei dati dashboard")
+            return jsonify({
+                "error": "Impossibile recuperare i dati della dashboard."
             }), 500
 
     return app

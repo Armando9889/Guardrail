@@ -26,6 +26,28 @@ class TestGuardrailAPI(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_dashboard_page(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            b"Guardrail Lite",
+            response.data,
+        )
+
+    def test_dashboard_data(self):
+        response = self.client.get("/dashboard-data")
+
+        self.assertEqual(response.status_code, 200)
+
+        data = response.get_json()
+
+        self.assertIn("summary", data)
+        self.assertIn("scheduler", data)
+        self.assertIn("violations", data)
+        self.assertIn("quarantine_events", data)
+        self.assertIn("dry_run", data)
+
     def test_health(self):
         response = self.client.get("/health")
 

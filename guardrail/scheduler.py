@@ -33,7 +33,7 @@ class GuardrailScheduler:
         LOG.info("Avvio scansione automatica.")
 
         try:
-            result = self.controller.scan()
+            result = self.controller.scan(source="automatic")
 
             LOG.info(
                 "Scansione completata: ID=%s, istanze=%s, violazioni=%s",

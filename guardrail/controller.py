@@ -359,10 +359,10 @@ class GuardrailController:
             dry_run=dry_run,
         )
 
-    def scan(self):
+    def scan(self, source="manual"):
         """Esegue una scansione completa delle istanze OpenStack."""
 
-        scan_id = self.database.start_scan()
+        scan_id = self.database.start_scan(source=source)
 
         try:
             servers = self._get_servers()

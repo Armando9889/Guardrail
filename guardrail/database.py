@@ -50,7 +50,8 @@ class GuardrailDatabase:
                     status TEXT NOT NULL,
                     instances_checked INTEGER NOT NULL DEFAULT 0,
                     violations_found INTEGER NOT NULL DEFAULT 0,
-                    details TEXT
+                    details TEXT,
+                    source TEXT NOT NULL DEFAULT 'manual'
                 );
 
                 CREATE TABLE IF NOT EXISTS violations (
@@ -88,19 +89,35 @@ class GuardrailDatabase:
                 );
             """)
 
+            columns = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA table_info(scans)"
+                ).fetchall()
+            }
+
+            if "source" not in columns:
+                conn.execute(
+                    "ALTER TABLE scans ADD COLUMN "
+                    "source TEXT NOT NULL DEFAULT 'legacy'"
+                )
+
     # ---------------------------------------------------------
     # SCANSIONI
     # ---------------------------------------------------------
 
-    def start_scan(self):
+    def start_scan(self, source="manual"):
         """Registra l'inizio di una scansione e restituisce il suo ID."""
+        if source not in ("manual", "automatic"):
+            raise ValueError("source deve essere manual oppure automatic")
+
         with self.connection() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO scans (started_at, status)
-                VALUES (?, 'running')
+                INSERT INTO scans (started_at, status, source)
+                VALUES (?, 'running', ?)
                 """,
-                (utc_now(),),
+                (utc_now(), source),
             )
 
             return cursor.lastrowid
