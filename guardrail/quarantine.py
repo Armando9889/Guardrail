@@ -106,6 +106,32 @@ class QuarantineManager:
 
         results = []
 
+        # Se una porta contiene il gruppo di quarantena insieme
+        # ad altri gruppi, recuperiamo prima la configurazione
+        # originale dallo storico. Senza uno storico attendibile
+        # non possiamo completare l'isolamento in sicurezza.
+        history_groups = {}
+        mixed_ports = []
+
+        for port in ports:
+            current_groups = list(
+                getattr(port, "security_group_ids", None) or []
+            )
+
+            if (
+                quarantine_group.id in current_groups
+                and set(current_groups) != {quarantine_group.id}
+            ):
+                mixed_ports.append(str(port.id))
+
+        if mixed_ports:
+            try:
+                history_groups = self._load_original_security_groups(
+                    instance_id
+                )
+            except QuarantineError:
+                history_groups = {}
+
         for port in ports:
             port_id = str(port.id)
 
@@ -113,15 +139,32 @@ class QuarantineManager:
                 getattr(port, "security_group_ids", None) or []
             )
 
+            status = "dry_run" if dry_run else "pending"
+            error = None
+
+            if set(original_groups) == {quarantine_group.id}:
+                status = "already_quarantined"
+
+            elif quarantine_group.id in original_groups:
+                if port_id in history_groups:
+                    original_groups = list(history_groups[port_id])
+                else:
+                    status = "failed"
+                    error = (
+                        "Porta parzialmente quarantinata senza una "
+                        "configurazione originale attendibile nello storico."
+                    )
+
             result = {
                 "port_id": port_id,
-                "status": "already_quarantined"
-                if quarantine_group.id in original_groups
-                else "dry_run" if dry_run else "pending",
+                "status": status,
                 "original_security_groups": original_groups,
                 "quarantine_security_group": quarantine_group.id,
                 "reason": reason,
             }
+
+            if error is not None:
+                result["error"] = error
 
             results.append(result)
 
@@ -149,7 +192,7 @@ class QuarantineManager:
         # Applicazione della quarantena.
         if not dry_run:
             for result, port in zip(results, ports):
-                if result["status"] == "already_quarantined":
+                if result["status"] != "pending":
                     continue
 
                 try:

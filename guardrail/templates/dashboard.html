@@ -95,6 +95,13 @@ button {
     cursor: pointer;
 }
 button:disabled { opacity: .6; cursor: wait; }
+.restore-button {
+    background: #15966b;
+    padding: 7px 10px;
+    font-size: 10px;
+    white-space: nowrap;
+}
+.restore-button:hover { background: #117653; }
 .refresh { color: var(--muted); font-size: 11px; }
 .grid {
     display: grid;
@@ -291,11 +298,28 @@ tbody tr:last-child td { border-bottom: 0; }
 
     <section class="bottom-grid">
         <div class="panel">
-            <div class="panel-header"><h2>Eventi di quarantena</h2></div>
+            <div class="panel-header">
+                <div>
+                    <h2>Eventi di quarantena</h2>
+                    <div class="panel-subtitle">
+                        Storico degli isolamenti e dei ripristini manuali
+                    </div>
+                </div>
+            </div>
             <div class="table-wrap">
                 <table>
-                    <thead><tr><th>Data</th><th>Istanza</th><th>Azione</th><th>Risultato</th></tr></thead>
-                    <tbody id="events-table"><tr><td colspan="4" class="empty">Caricamento...</td></tr></tbody>
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Istanza</th>
+                            <th>Azione</th>
+                            <th>Risultato</th>
+                            <th>Intervento</th>
+                        </tr>
+                    </thead>
+                    <tbody id="events-table">
+                        <tr><td colspan="5" class="empty">Caricamento...</td></tr>
+                    </tbody>
                 </table>
             </div>
         </div>
@@ -305,7 +329,7 @@ tbody tr:last-child td { border-bottom: 0; }
             <div class="status-row"><span>Backend</span><strong>Flask REST API</strong></div>
             <div class="status-row"><span>Persistenza</span><strong>SQLite</strong></div>
             <div class="status-row"><span>Monitoraggio</span><strong>Aggiornamento ogni 15 s</strong></div>
-            <div class="status-row"><span>Intervento sulle VM</span><strong>Non disponibile dalla UI</strong></div>
+            <div class="status-row"><span>Intervento sulle VM</span><strong>Ripristino manuale · Admin</strong></div>
         </div>
     </section>
 
@@ -343,6 +367,80 @@ function badge(value) {
 }
 
 let isAdmin = false;
+
+function getActiveQuarantines(events) {
+    const active = new Map();
+
+    // Gli eventi API arrivano in ordine decrescente:
+    // li elaboriamo dal più vecchio al più recente.
+    const ordered = [...events].sort(
+        (a, b) => Number(a.id) - Number(b.id)
+    );
+
+    for (const event of ordered) {
+        let details = event.details;
+
+        if (typeof details === "string") {
+            try {
+                details = JSON.parse(details);
+            } catch {
+                continue;
+            }
+        }
+
+        if (!details || !Array.isArray(details.ports)) {
+            continue;
+        }
+
+        if (
+            event.action === "quarantine" &&
+            ["quarantined", "partial"].includes(event.result)
+        ) {
+            for (const port of details.ports) {
+                if (
+                    !["quarantined", "already_quarantined"].includes(
+                        port.status
+                    )
+                ) {
+                    continue;
+                }
+
+                if (port.port_id) {
+                    if (!active.has(event.instance_id)) {
+                        active.set(event.instance_id, new Set());
+                    }
+
+                    active.get(event.instance_id).add(
+                        String(port.port_id)
+                    );
+                }
+            }
+        }
+
+        if (
+            event.action === "restore" &&
+            ["restored", "partial"].includes(event.result)
+        ) {
+            for (const port of details.ports) {
+                if (
+                    port.status === "restored" &&
+                    port.port_id &&
+                    active.has(event.instance_id)
+                ) {
+                    active.get(event.instance_id).delete(
+                        String(port.port_id)
+                    );
+
+                    if (active.get(event.instance_id).size === 0) {
+                        active.delete(event.instance_id);
+                    }
+                }
+            }
+        }
+    }
+
+    return new Set(active.keys());
+}
 
 function clearAuthentication(message = "Non autenticato") {
     sessionStorage.removeItem("guardrail_token");
@@ -382,8 +480,10 @@ function clearAuthentication(message = "Non autenticato") {
         '<tr><td colspan="6" class="empty">Autenticazione richiesta</td></tr>';
 
     $("events-table").innerHTML =
-        '<tr><td colspan="4" class="empty">Autenticazione richiesta</td></tr>';
+        '<tr><td colspan="5" class="empty">Autenticazione richiesta</td></tr>';
 }
+
+const API_BASE = "/guardrail";
 
 async function apiFetch(url, options = {}) {
     const token = sessionStorage.getItem("guardrail_token");
@@ -432,7 +532,7 @@ async function authenticate() {
     try {
         sessionStorage.setItem("guardrail_token", token);
 
-        const response = await apiFetch("/auth-info");
+        const response = await apiFetch(`${API_BASE}/auth-info`);
 
         if (!response.ok) {
             throw new Error("Autenticazione non riuscita.");
@@ -467,17 +567,26 @@ async function refreshDashboard() {
     }
 
     try {
-        const [healthResponse, dataResponse] = await Promise.all([
-            fetch("/health"),
-            apiFetch("/dashboard-data")
-        ]);
+        const [healthResponse, dataResponse, eventsResponse] =
+            await Promise.all([
+                fetch(`${API_BASE}/health`),
+                apiFetch(`${API_BASE}/dashboard-data`),
+                apiFetch(`${API_BASE}/quarantine-events?limit=500`)
+            ]);
 
-        if (!healthResponse.ok || !dataResponse.ok) {
+        if (
+            !healthResponse.ok ||
+            !dataResponse.ok ||
+            !eventsResponse.ok
+        ) {
             throw new Error("API non disponibile");
         }
 
         const health = await healthResponse.json();
         const data = await dataResponse.json();
+        const eventData = await eventsResponse.json();
+        const allEvents = eventData.quarantine_events ||
+            data.quarantine_events || [];
 
         $("api-status").className = "badge green";
         $("api-status").textContent = "ONLINE";
@@ -529,15 +638,55 @@ async function refreshDashboard() {
             </tr>`).join("") :
             '<tr><td colspan="6" class="empty">Nessuna violazione</td></tr>';
 
-        const events = data.quarantine_events.slice(0, 10);
-        $("events-table").innerHTML = events.length ? events.map(item => `
-            <tr>
-                <td>${formatDate(item.created_at)}</td>
-                <td>${escapeHtml(item.instance_id)}</td>
-                <td>${escapeHtml(item.action)}</td>
-                <td>${badge(item.result)}</td>
-            </tr>`).join("") :
-            '<tr><td colspan="4" class="empty">Nessun evento registrato</td></tr>';
+        const activeQuarantines = getActiveQuarantines(allEvents);
+
+        // Individua l'evento più recente per ogni istanza.
+        const latestEventByInstance = new Map();
+        const orderedEvents = [...allEvents].sort(
+            (a, b) => Number(b.id) - Number(a.id)
+        );
+
+        for (const event of orderedEvents) {
+            const instanceId = String(event.instance_id);
+            if (!latestEventByInstance.has(instanceId)) {
+                latestEventByInstance.set(instanceId, String(event.id));
+            }
+        }
+
+        const events = orderedEvents.slice(0, 10);
+
+        $("events-table").innerHTML = events.length ? events.map(item => {
+            const instanceId = String(item.instance_id);
+            const canRestore =
+                isAdmin &&
+                activeQuarantines.has(instanceId) &&
+                latestEventByInstance.get(instanceId) === String(item.id);
+
+            const actionButton = canRestore
+                ? `<button class="restore-button"
+                    data-restore-instance="${escapeHtml(item.instance_id)}">
+                    Ripristina
+                   </button>`
+                : "—";
+
+            return `
+                <tr>
+                    <td>${formatDate(item.created_at)}</td>
+                    <td>${escapeHtml(item.instance_id)}</td>
+                    <td>${escapeHtml(item.action)}</td>
+                    <td>${badge(item.result)}</td>
+                    <td>${actionButton}</td>
+                </tr>`;
+        }).join("") :
+            '<tr><td colspan="5" class="empty">Nessun evento registrato</td></tr>';
+
+        document.querySelectorAll("[data-restore-instance]").forEach(
+            button => {
+                button.addEventListener("click", () => {
+                    restoreInstance(button.dataset.restoreInstance, button);
+                });
+            }
+        );
 
     } catch (error) {
         if (!sessionStorage.getItem("guardrail_token")) {
@@ -564,7 +713,7 @@ async function initializeDashboard() {
     $("auth-status").textContent = "Verifica sessione...";
 
     try {
-        const response = await apiFetch("/auth-info");
+        const response = await apiFetch(`${API_BASE}/auth-info`);
 
         if (!response.ok) {
             throw new Error("Sessione non valida.");
@@ -592,7 +741,7 @@ async function manualScan() {
     button.textContent = "Scansione in corso...";
 
     try {
-        const response = await apiFetch("/scan", { method: "POST" });
+        const response = await apiFetch(`${API_BASE}/scan`, { method: "POST" });
         const result = await response.json();
 
         if (!response.ok) {
@@ -609,6 +758,69 @@ async function manualScan() {
             button.disabled = false;
             button.textContent = "Avvia scansione";
         }, 1500);
+    }
+}
+
+async function restoreInstance(instanceId, button) {
+    if (!isAdmin) {
+        alert("Operazione riservata agli amministratori.");
+        return;
+    }
+
+    const confirmed = confirm(
+        "Confermi il ripristino della VM?\\n\\n" +
+        "Guardrail ripristinerà i gruppi di sicurezza Neutron " +
+        "precedenti alla quarantena."
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    button.disabled = true;
+    button.textContent = "Ripristino...";
+
+    try {
+        const response = await apiFetch(
+            `${API_BASE}/restore/` + encodeURIComponent(instanceId),
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    dry_run: false
+                })
+            }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                result.error || "Ripristino non riuscito."
+            );
+        }
+
+        if (result.result === "restored") {
+            alert("Ripristino completato correttamente.");
+        } else if (result.result === "partial") {
+            alert(
+                "Ripristino parziale. Verificare gli eventi e " +
+                "lo stato delle porte Neutron."
+            );
+        } else {
+            throw new Error(
+                "Ripristino non completato: " + result.result
+            );
+        }
+
+        await refreshDashboard();
+
+    } catch (error) {
+        alert("Errore durante il ripristino: " + error.message);
+        button.disabled = false;
+        button.textContent = "Ripristina";
     }
 }
 

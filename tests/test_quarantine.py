@@ -101,6 +101,69 @@ class TestQuarantineManager(unittest.TestCase):
 
         self.database.record_quarantine_event.assert_called_once()
 
+    def test_mixed_security_groups_use_original_history_for_quarantine(self):
+        port = SimpleNamespace(
+            id="port-123",
+            security_group_ids=["sg-quarantine", "sg-extra"],
+        )
+        self.connection.network.ports.return_value = [port]
+        self.database.get_instance_quarantine_events.return_value = [
+            {
+                "id": 1,
+                "action": "quarantine",
+                "result": "quarantined",
+                "details": {
+                    "ports": [
+                        {
+                            "port_id": "port-123",
+                            "status": "quarantined",
+                            "original_security_groups": ["sg-original"],
+                        }
+                    ]
+                },
+            }
+        ]
+
+        result = self.manager.quarantine_instance(
+            "vm-123",
+            "Configurazione da verificare",
+            dry_run=False,
+        )
+
+        self.connection.network.update_port.assert_called_once_with(
+            port,
+            security_groups=["sg-quarantine"],
+        )
+        self.assertEqual(result["result"], "quarantined")
+        self.assertEqual(result["ports"][0]["status"], "quarantined")
+
+        saved_details = (
+            self.database.record_quarantine_event.call_args.kwargs["details"]
+        )
+        self.assertEqual(
+            saved_details["ports"][0]["original_security_groups"],
+            ["sg-original"],
+        )
+
+    def test_mixed_security_groups_without_history_are_not_modified(self):
+        port = SimpleNamespace(
+            id="port-123",
+            security_group_ids=["sg-quarantine", "sg-extra"],
+        )
+        self.connection.network.ports.return_value = [port]
+        self.database.get_instance_quarantine_events.return_value = []
+
+        result = self.manager.quarantine_instance(
+            "vm-123",
+            "Configurazione da verificare",
+            dry_run=False,
+        )
+
+        self.connection.network.update_port.assert_not_called()
+        self.assertEqual(result["result"], "failed")
+        self.assertEqual(result["ports"][0]["status"], "failed")
+        self.assertIn("storico", result["ports"][0]["error"])
+
     def test_restore_rejects_invalid_dry_run(self):
         invalid_values = ("false", 0, 1, None)
 

@@ -297,16 +297,32 @@ class TestGuardrailController(unittest.TestCase):
 
         self.assertTrue(call_kwargs["dry_run"])
 
-    def test_invalid_dry_run_configuration(self):
-        self.policy["quarantine_dry_run"] = "true"
+    def test_false_dry_run_configuration_is_accepted(self):
+        self.policy["quarantine_dry_run"] = False
         self._write_config()
 
-        with self.assertRaises(ValueError):
-            GuardrailController(
-                config_path=self.config_path,
-                db_path=str(self.temp_path / "invalid.db"),
-                connection=self.connection,
-            )
+        controller = GuardrailController(
+            config_path=self.config_path,
+            db_path=str(self.temp_path / "false-dry-run.db"),
+            connection=self.connection,
+        )
+
+        self.assertIs(controller.policy["quarantine_dry_run"], False)
+
+    def test_invalid_dry_run_configuration(self):
+        invalid_values = ("true", "false", 0, 1, None)
+
+        for value in invalid_values:
+            with self.subTest(dry_run=value):
+                self.policy["quarantine_dry_run"] = value
+                self._write_config()
+
+                with self.assertRaises(ValueError):
+                    GuardrailController(
+                        config_path=self.config_path,
+                        db_path=str(self.temp_path / "invalid.db"),
+                        connection=self.connection,
+                    )
 
     def test_r8_violations_are_persisted_separately(self):
         server = self._server()

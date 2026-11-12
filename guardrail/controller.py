@@ -189,10 +189,9 @@ class GuardrailController:
                 "quarantine_security_group deve essere una stringa non vuota."
             )
 
-        # La modalità dry-run non può essere disattivata dalla policy API.
-        if policy["quarantine_dry_run"] is not True:
+        if not isinstance(policy["quarantine_dry_run"], bool):
             raise ValueError(
-                "quarantine_dry_run deve rimanere true."
+                "quarantine_dry_run deve essere un valore booleano."
             )
 
         return dict(policy)
