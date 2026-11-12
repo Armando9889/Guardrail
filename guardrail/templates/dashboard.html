@@ -261,7 +261,7 @@ tbody tr:last-child td { border-bottom: 0; }
             <div class="status-row"><span>Ultima scansione automatica</span><strong id="last-auto">—</strong></div>
             <div class="status-row"><span>Prossima scansione prevista</span><strong id="next-auto">—</strong></div>
             <div class="status-row"><span>Intervallo configurato</span><strong id="interval">—</strong></div>
-            <div class="status-row"><span>Modalità quarantena</span><strong id="dry-run">—</strong></div>
+            <div class="status-row"><span>Modalità simulazione quarantena</span><strong id="dry-run">—</strong></div>
         </div>
 
         <div class="panel">
@@ -612,8 +612,8 @@ async function refreshDashboard() {
         $("next-auto").textContent = formatDate(scheduler.next_automatic_scan);
         $("interval").textContent = scheduler.interval_seconds + " secondi";
         $("dry-run").innerHTML = data.dry_run ?
-            badge("ATTIVO · nessuna modifica reale") :
-            badge("DISATTIVATO");
+            badge("SIMULAZIONE ATTIVA") :
+            badge("SIMULAZIONE DISATTIVATA · interventi reali");
 
         const scans = data.scans.slice(0, 8);
         $("recent-scans").innerHTML = scans.length ? scans.map(scan => `
