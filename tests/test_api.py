@@ -368,5 +368,58 @@ class TestGuardrailAPI(unittest.TestCase):
         controller.scan.assert_called_once()
 
 
+    def test_admin_restore_rejects_non_admin_user(self):
+        controller = Mock()
+        app = create_app(controller, enable_auth=True)
+        app.config["TESTING"] = True
+
+        response = app.test_client().post(
+            "/restore/vm-123",
+            headers={
+                "X-Identity-Status": "Confirmed",
+                "X-User-Id": "user-123",
+                "X-Roles": "member",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        controller.restore_instance.assert_not_called()
+
+    def test_admin_policy_update_rejects_non_admin_user(self):
+        controller = Mock()
+        app = create_app(controller, enable_auth=True)
+        app.config["TESTING"] = True
+
+        response = app.test_client().put(
+            "/policy",
+            json={"scan_interval_seconds": 600},
+            headers={
+                "X-Identity-Status": "Confirmed",
+                "X-User-Id": "user-123",
+                "X-Roles": "member",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        controller.save_policy.assert_not_called()
+
+    def test_admin_audit_events_rejects_non_admin_user(self):
+        controller = Mock()
+        app = create_app(controller, enable_auth=True)
+        app.config["TESTING"] = True
+
+        response = app.test_client().get(
+            "/audit-events",
+            headers={
+                "X-Identity-Status": "Confirmed",
+                "X-User-Id": "user-123",
+                "X-Roles": "member",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        controller.database.list_admin_audit_events.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

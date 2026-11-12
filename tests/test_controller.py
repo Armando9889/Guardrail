@@ -266,6 +266,63 @@ class TestGuardrailController(unittest.TestCase):
         self.quarantine_manager.quarantine_instance.assert_not_called()
         self.assertEqual(result["quarantine_results"], [])
 
+    def test_failed_server_retrieval_preserves_open_violations(self):
+        server = self._server(image_id="unauthorized-image")
+        self._prepare_scan([server])
+
+        first_result = self.controller.scan()
+
+        self.assertEqual(first_result["status"], "completed")
+
+        violations_before = self.controller.database.list_violations()
+        self.assertTrue(
+            any(
+                violation["rule_id"] == "R4"
+                and violation["status"] == "open"
+                for violation in violations_before
+            )
+        )
+
+        # Simula un errore nel recupero completo delle istanze Nova.
+        self.connection.compute.servers.side_effect = RuntimeError(
+            "Nova server retrieval failed"
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Nova server retrieval failed",
+        ):
+            self.controller.scan()
+
+        latest_scan = self.controller.database.list_scans(limit=1)[0]
+
+        self.assertEqual(latest_scan["status"], "failed")
+        self.assertEqual(latest_scan["instances_checked"], 0)
+
+        violations_after = self.controller.database.list_violations()
+
+        self.assertTrue(
+            any(
+                violation["rule_id"] == "R4"
+                and violation["status"] == "open"
+                for violation in violations_after
+            )
+        )
+
+        # Deve essere stata effettuata una sola richiesta per la seconda scansione.
+        self.assertEqual(
+            self.connection.compute.servers.call_count,
+            2,
+        )
+
+        self.assertEqual(
+            self.connection.compute.servers.call_args.kwargs,
+            {
+                "all_projects": True,
+                "details": True,
+            },
+        )
+
     def test_quarantine_failure_does_not_fail_scan(self):
         server = self._server(image_id="unauthorized-image")
         self._prepare_scan([server])

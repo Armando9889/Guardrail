@@ -26,6 +26,19 @@ class TestQuarantineManager(unittest.TestCase):
             self.quarantine_group
         )
 
+        self.connection.network.security_group_rules.return_value = [
+            {
+                "direction": "ingress",
+                "ether_type": "IPv4",
+                "protocol": "tcp",
+                "port_range_min": 22,
+                "port_range_max": 22,
+                "remote_ip_prefix": "192.0.2.1/32",
+                "remote_group_id": None,
+                "remote_address_group_id": None,
+            }
+        ]
+
         self.database.record_quarantine_event.return_value = 1
 
     def test_missing_quarantine_group(self):
@@ -36,6 +49,98 @@ class TestQuarantineManager(unittest.TestCase):
                 "vm-123",
                 "Immagine non autorizzata",
             )
+
+    def test_quarantine_rejects_open_ingress_rule(self):
+        self.connection.network.security_group_rules.return_value = [
+            {
+                "direction": "ingress",
+                "ether_type": "IPv4",
+                "protocol": "tcp",
+                "port_range_min": 22,
+                "port_range_max": 22,
+                "remote_ip_prefix": "0.0.0.0/0",
+                "remote_group_id": None,
+                "remote_address_group_id": None,
+            }
+        ]
+
+        with self.assertRaises(QuarantineError):
+            self.manager.quarantine_instance(
+                "vm-123",
+                "Immagine non autorizzata",
+                dry_run=False,
+            )
+
+        self.connection.network.update_port.assert_not_called()
+        self.database.record_quarantine_event.assert_not_called()
+        self.connection.network.ports.assert_not_called()
+
+    def test_quarantine_rejects_egress_rule(self):
+        self.connection.network.security_group_rules.return_value = [
+            {
+                "direction": "egress",
+                "ether_type": "IPv4",
+                "protocol": "tcp",
+                "port_range_min": 22,
+                "port_range_max": 22,
+                "remote_ip_prefix": "192.0.2.1/32",
+                "remote_group_id": None,
+                "remote_address_group_id": None,
+            }
+        ]
+
+        with self.assertRaises(QuarantineError):
+            self.manager.quarantine_instance(
+                "vm-123",
+                "Immagine non autorizzata",
+                dry_run=False,
+            )
+
+        self.connection.network.update_port.assert_not_called()
+        self.database.record_quarantine_event.assert_not_called()
+
+    def test_quarantine_rejects_multiple_rules(self):
+        valid_rule = {
+            "direction": "ingress",
+            "ether_type": "IPv4",
+            "protocol": "tcp",
+            "port_range_min": 22,
+            "port_range_max": 22,
+            "remote_ip_prefix": "192.0.2.1/32",
+            "remote_group_id": None,
+            "remote_address_group_id": None,
+        }
+
+        self.connection.network.security_group_rules.return_value = [
+            valid_rule,
+            valid_rule.copy(),
+        ]
+
+        with self.assertRaises(QuarantineError):
+            self.manager.quarantine_instance(
+                "vm-123",
+                "Immagine non autorizzata",
+                dry_run=False,
+            )
+
+        self.connection.network.update_port.assert_not_called()
+        self.database.record_quarantine_event.assert_not_called()
+
+    def test_quarantine_rejects_security_group_rules_lookup_failure(self):
+        self.connection.network.security_group_rules.side_effect = (
+            RuntimeError("Neutron non disponibile")
+        )
+
+        with self.assertRaises(QuarantineError):
+            self.manager.quarantine_instance(
+                "vm-123",
+                "Immagine non autorizzata",
+                dry_run=False,
+            )
+
+        self.connection.network.update_port.assert_not_called()
+        self.database.record_quarantine_event.assert_not_called()
+        self.connection.network.ports.assert_not_called()
 
     def test_missing_instance_ports(self):
         self.connection.network.ports.return_value = []

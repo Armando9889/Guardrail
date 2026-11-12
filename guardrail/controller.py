@@ -321,28 +321,16 @@ class GuardrailController:
         return self.quarantine_manager
 
     def _get_servers(self):
-        """Recupera le istanze Nova visibili all'amministratore."""
+        """Recupera tutte le istanze Nova visibili all'amministratore."""
 
         connection = self._get_connection()
 
-        try:
-            return list(
-                connection.compute.servers(
-                    all_projects=True,
-                    details=True,
-                )
+        return list(
+            connection.compute.servers(
+                all_projects=True,
+                details=True,
             )
-
-        except Exception:
-            LOG.warning(
-                "Impossibile recuperare tutte le istanze. "
-                "Verranno recuperate quelle accessibili.",
-                exc_info=True,
-            )
-
-            return list(
-                connection.compute.servers(details=True)
-            )
+        )
 
     def _project_totals(self, servers):
         """Calcola RAM e vCPU aggregate per progetto."""

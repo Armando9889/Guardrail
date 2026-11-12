@@ -120,9 +120,15 @@ abilitate, il componente `QuarantineManager`:
     `guardrail-quarantine`.
 5.  Registra nel database l'operazione e il relativo risultato.
 
-Il Security Group `guardrail-quarantine` è configurato senza regole di
-ingresso e di uscita, in modo da limitare la connettività di rete
-dell'istanza isolata.
+Il Security Group `guardrail-quarantine` deve contenere esattamente
+una regola: SSH TCP sulla porta 22, IPv4, in ingresso (`ingress`), con
+sorgente costituita da un singolo indirizzo IPv4 con prefisso `/32`.
+Non sono ammesse ulteriori regole, comprese quelle in uscita (`egress`).
+
+Prima di modificare le porte Neutron, Guardrail verifica la configurazione
+del gruppo. Se il gruppo non esiste, non è possibile recuperarne le regole
+oppure la configurazione non rispetta i requisiti, l'operazione viene
+rifiutata senza modificare l'istanza.
 
 ### Ripristino della configurazione
 
@@ -286,7 +292,8 @@ Guardrail.
 
 ## Servizi
 
-Guardrail prevede due servizi principali gestiti tramite systemd:
+Il plugin Guardrail viene abilitato come servizio DevStack e avvia
+due processi gestiti tramite systemd:
 
   ----------------------------------------------------------------------------
   Servizio                                 Responsabilità
@@ -391,9 +398,8 @@ Esempio di configurazione:
 ```
 
 `allowed_image_ids` contiene gli identificativi delle immagini Glance
-autorizzate. Se la lista è vuota, il controllo R4 non dispone di
-immagini autorizzate e deve essere configurato coerentemente con la
-policy desiderata.
+autorizzate. Se la lista è vuota, il controllo R4 è disabilitato e non
+vengono applicate restrizioni sulle immagini utilizzate dalle istanze.
 
 `project_limits` permette di definire soglie specifiche per singolo
 progetto. La chiave deve corrispondere all'identificativo del progetto
@@ -405,15 +411,15 @@ Per abilitare la quarantena reale, impostare `quarantine_dry_run` a
 
 ## API REST
 
-Guardrail espone un'API REST attraverso Flask. Le operazioni sono
-protette mediante autenticazione Keystone e controlli di autorizzazione
-in base al ruolo dell'utente.
+Guardrail espone un'API REST attraverso Flask. Gli endpoint `/` e
+`/health` sono pubblici. Tutti gli altri endpoint richiedono
+autenticazione Keystone; le operazioni amministrative richiedono inoltre
+un utente con ruolo amministrativo.
 
   --------------------------------------------------------------------------------
   Metodo            Endpoint                   Descrizione       Autorizzazione
   ----------------- -------------------------- ----------------- -----------------
-  GET               `/`                        Dashboard web.    Accesso alla
-                                                                 dashboard
+  GET               `/`                        Dashboard web.    Pubblica
 
   GET               `/health`                  Verifica dello    Pubblica
                                                stato del         

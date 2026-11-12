@@ -45,7 +45,50 @@ class QuarantineManager:
                 f"{self.quarantine_security_group}"
             )
 
+        self._validate_quarantine_group_rules(group)
+
         return group
+
+    def _validate_quarantine_group_rules(self, group):
+        """Verifica che il gruppo consenta esclusivamente SSH da un IP /32."""
+        try:
+            rules = list(
+                self.connection.network.security_group_rules(
+                    security_group_id=group.id
+                )
+            )
+        except Exception as exc:
+            raise QuarantineError(
+                "Impossibile verificare le regole del gruppo "
+                "di sicurezza di quarantena."
+            ) from exc
+
+        if len(rules) != 1:
+            raise QuarantineError(
+                "Configurazione non sicura: il gruppo di quarantena "
+                "deve contenere esattamente una regola."
+            )
+
+        rule = rules[0]
+        rule_data = rule.to_dict() if hasattr(rule, "to_dict") else rule
+
+        valid_rule = (
+            rule_data.get("direction") == "ingress"
+            and rule_data.get("ether_type", rule_data.get("ethertype")) == "IPv4"
+            and str(rule_data.get("protocol", "")).lower() == "tcp"
+            and rule_data.get("port_range_min") == 22
+            and rule_data.get("port_range_max") == 22
+            and str(rule_data.get("remote_ip_prefix") or "").endswith("/32")
+            and rule_data.get("remote_group_id") is None
+            and rule_data.get("remote_address_group_id") is None
+        )
+
+        if not valid_rule:
+            raise QuarantineError(
+                "Configurazione non sicura: il gruppo di quarantena "
+                "deve consentire esclusivamente SSH TCP/IPv4 "
+                "da un singolo indirizzo /32."
+            )
 
     def _get_instance_ports(self, instance_id):
         """Recupera le porte Neutron associate alla VM."""
