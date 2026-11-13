@@ -258,6 +258,7 @@ Per installare Guardrail è necessario disporre di:
 -   Git.
 -   Accesso amministrativo ai servizi OpenStack.
 -   Dipendenze Python definite nel file `requirements.txt`.
+-   Configurazione OpenStack SDK: è necessario predisporre un profilo amministrativo denominato devstack-admin nel file clouds.yaml, utilizzato da Guardrail per autenticarsi e interagire con i servizi OpenStack.
 
 ## Installazione tramite DevStack
 
