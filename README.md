@@ -19,10 +19,6 @@ attraverso un'API REST e una dashboard web. L'autenticazione e
 l'autorizzazione delle operazioni amministrative sono integrate con
 Keystone.
 
-Guardrail supporta inoltre l'integrazione con Horizon, consentendo di
-raggiungere la dashboard attraverso il pannello amministrativo di
-OpenStack.
-
 ## Funzionalità principali
 
 -   Scansione periodica automatizzata delle istanze Nova.
@@ -37,7 +33,6 @@ OpenStack.
 -   Ripristino manuale dei Security Group originali.
 -   Registrazione degli eventi di quarantena e ripristino.
 -   Dashboard web per il monitoraggio delle attività.
--   Integrazione della dashboard nel pannello amministrativo di Horizon.
 -   Autenticazione e autorizzazione tramite Keystone.
 -   Registrazione delle operazioni amministrative tramite audit log.
 
@@ -286,9 +281,7 @@ cd /opt/stack/devstack
 ./stack.sh
 ```
 
-Il plugin provvede a configurare l'ambiente, installare le dipendenze,
-predisporre la directory di configurazione e registrare i servizi
-Guardrail.
+Il plugin verifica la disponibilità dell'ambiente Python e delle dipendenze necessarie, predispone la directory di configurazione e registra i servizi Guardrail. Il virtual environment e le dipendenze Python devono essere predisposti preventivamente.
 
 ## Servizi
 
@@ -471,7 +464,7 @@ L'API è raggiungibile direttamente all'indirizzo:
 http://127.0.0.1:9876
 ```
 
-## Dashboard e integrazione con Horizon
+## Dashboard web
 
 Guardrail include una dashboard web realizzata con Flask e HTML, CSS e
 JavaScript.
@@ -492,14 +485,6 @@ La dashboard è raggiungibile direttamente tramite il servizio Flask:
 ``` text
 http://127.0.0.1:9876/
 ```
-
-È inoltre integrata con Horizon attraverso un pannello dedicato
-nell'area amministrativa.
-
-Il pannello Horizon denominato **Guardrail** reindirizza alla dashboard
-Flask. Apache HTTP Server opera come reverse proxy, inoltrando le
-richieste dal percorso `/guardrail/` al servizio locale
-`http://127.0.0.1:9876/`.
 
 In questo modo la dashboard può essere raggiunta attraverso lo stesso
 host utilizzato da Horizon, senza esporre direttamente Flask sulla rete.
