@@ -1,7 +1,7 @@
 # Guardrail
 
 <p align="center">
-  <img src="guardrail-logo.svg" alt="Guardrail" width="420">
+  <img src="logo.svg" alt="Guardrail" width="420">
 </p>
 
 Guardrail è un plugin per DevStack che estende OpenStack...
