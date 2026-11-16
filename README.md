@@ -1,5 +1,12 @@
 # Guardrail
 
+<p align="center">
+  <img src="guardrail-logo.svg" alt="Guardrail Logo" width="400">
+</p>
+
+Guardrail è un plugin per DevStack che estende OpenStack...
+# Guardrail
+
 Guardrail è un plugin per DevStack che estende OpenStack con un sistema
 automatizzato di verifica della conformità delle istanze gestite da
 Nova.
