@@ -13,6 +13,6 @@
     "R6"
   ],
   "quarantine_security_group": "guardrail-quarantine",
-  "quarantine_dry_run": true,
+  "quarantine_dry_run": false,
   "project_limits": {}
 }

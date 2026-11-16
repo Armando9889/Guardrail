@@ -149,6 +149,11 @@ eventi di quarantena e ripristino.
 Il parametro `quarantine_dry_run` permette di scegliere tra due modalità
 operative.
 
+Nelle nuove installazioni, Guardrail utilizza la modalità reale per
+impostazione predefinita (`quarantine_dry_run: false`). Per utilizzare
+la modalità simulata, è necessario impostare esplicitamente
+`quarantine_dry_run` a `true`.
+
 **Modalità simulata (`dry-run`):**
 
 -   Simula l'esecuzione della quarantena.
@@ -385,7 +390,7 @@ Esempio di configurazione:
   "max_project_vcpus": 8,
   "auto_quarantine_rules": ["R4", "R6"],
   "quarantine_security_group": "guardrail-quarantine",
-  "quarantine_dry_run": true,
+  "quarantine_dry_run": false,
   "project_limits": {
     "PROJECT_ID": {
       "max_ram_mb": 8192,
@@ -403,8 +408,8 @@ vengono applicate restrizioni sulle immagini utilizzate dalle istanze.
 progetto. La chiave deve corrispondere all'identificativo del progetto
 OpenStack.
 
-Per abilitare la quarantena reale, impostare `quarantine_dry_run` a
-`false`. La configurazione effettiva si trova in
+Per attivare la modalità simulata, impostare `quarantine_dry_run` a
+`true`. La configurazione effettiva si trova in
 `/etc/guardrail/config.json`.
 
 ## API REST
