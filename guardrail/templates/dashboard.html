@@ -669,12 +669,39 @@ async function refreshDashboard() {
                    </button>`
                 : "—";
 
+            let displayedResult = item.result;
+
+            if (item.action === "quarantine" && item.details) {
+                try {
+                    const details = typeof item.details === "string"
+                        ? JSON.parse(item.details)
+                        : item.details;
+
+                    const portStatuses = (details.ports || [])
+                        .map(port => port.status);
+
+                    if (
+                        portStatuses.length > 0 &&
+                        portStatuses.every(status =>
+                            status === "already_quarantined"
+                        )
+                    ) {
+                        displayedResult = "already_quarantined";
+                    }
+                } catch (error) {
+                    console.warn(
+                        "Impossibile interpretare i dettagli dell'evento:",
+                        error
+                    );
+                }
+            }
+
             return `
                 <tr>
                     <td>${formatDate(item.created_at)}</td>
                     <td>${escapeHtml(item.instance_id)}</td>
                     <td>${escapeHtml(item.action)}</td>
-                    <td>${badge(item.result)}</td>
+                    <td>${badge(displayedResult)}</td>
                     <td>${actionButton}</td>
                 </tr>`;
         }).join("") :
