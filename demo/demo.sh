@@ -37,8 +37,6 @@ cleanup() {
                 "$API/restore/$VM_ID" || true
         fi
 
-        openstack server set \
-            --property security_profile=general "$VM_ID" || true
 
         CURRENT_SG=$(openstack port show "$PORT_ID" \
             -f value -c security_group_ids 2>/dev/null || true)
@@ -94,11 +92,7 @@ fi
 
 CLEANUP_READY=1
 
-openstack server set \
-    --property security_profile=invalid-demo "$VM_ID"
-
-echo "Profilo di sicurezza non valido impostato."
-echo "La VM è pronta per il test."
+echo "VM già non conforme: i metadati rimangono invariati."
 
 pause
 
