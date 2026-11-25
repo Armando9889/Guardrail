@@ -1,7 +1,6 @@
 import logging
 import signal
 import threading
-import time
 
 from guardrail.controller import GuardrailController
 

@@ -132,7 +132,9 @@ class QuarantineManager:
 
         return "failed"
 
-    def quarantine_instance(self, instance_id, reason, dry_run=True):
+    def quarantine_instance(
+        self, instance_id, reason, dry_run=True, violation_ids=None
+    ):
         """
         Prepara o applica la quarantena a una VM.
 
@@ -225,6 +227,7 @@ class QuarantineManager:
                 action="quarantine",
                 result="pending",
                 details=details,
+                violation_ids=violation_ids,
             )
         except Exception as exc:
             raise QuarantineError(

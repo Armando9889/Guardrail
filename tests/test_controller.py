@@ -250,6 +250,43 @@ class TestGuardrailController(unittest.TestCase):
         self.quarantine_manager.quarantine_instance.assert_called_once()
         self.assertEqual(len(result["quarantine_results"]), 1)
 
+    def test_r4_and_r6_share_one_quarantine_operation(self):
+        server = self._server(
+            image_id="unauthorized-image",
+            security_profile="invalid",
+        )
+        self._prepare_scan([server])
+
+        result = self.controller.scan()
+
+        automatic_violations = [
+            violation
+            for violation in result["violations"]
+            if violation.get("rule") in ("R4", "R6")
+        ]
+
+        self.assertCountEqual(
+            [violation["rule"] for violation in automatic_violations],
+            ["R4", "R6"],
+        )
+
+        self.quarantine_manager.quarantine_instance.assert_called_once()
+
+        call_kwargs = (
+            self.quarantine_manager.quarantine_instance.call_args.kwargs
+        )
+
+        self.assertEqual(call_kwargs["instance_id"], "vm-123")
+        self.assertCountEqual(
+            call_kwargs["violation_ids"],
+            [
+                violation["violation_id"]
+                for violation in automatic_violations
+            ],
+        )
+
+        self.assertEqual(len(result["quarantine_results"]), 1)
+
     def test_non_automatic_rule_does_not_trigger_quarantine(self):
         server = self._server()
         server.metadata = {"security_profile": "general"}

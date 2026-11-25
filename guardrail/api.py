@@ -397,9 +397,12 @@ def create_app(controller=None, enable_auth=False):
             old_policy = dict(guardrail.policy)
             guardrail.save_policy(payload)
 
+            missing = object()
+
             changed_keys = sorted(
-                key for key in payload
-                if old_policy.get(key) != payload.get(key)
+                key
+                for key in set(old_policy) | set(guardrail.policy)
+                if old_policy.get(key, missing) != guardrail.policy.get(key, missing)
             )
 
             try:

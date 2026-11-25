@@ -6,7 +6,6 @@ enable_service guardrail-api guardrail-scheduler
 
 # Directories
 GUARDRAIL_DIR=/opt/stack/guardrail
-GUARDRAIL_BIN_DIR=${GUARDRAIL_DIR}/bin
 GUARDRAIL_CONF_DIR=/etc/guardrail
 GUARDRAIL_LOG_DIR=/var/log/guardrail
 GUARDRAIL_DB_FILE=/var/lib/guardrail/guardrail.db

@@ -436,9 +436,20 @@ class GuardrailController:
                 continue
 
             if instance_id not in instances_to_quarantine:
-                instances_to_quarantine[instance_id] = []
+                instances_to_quarantine[instance_id] = {
+                    "rules": [],
+                    "violation_ids": [],
+                }
 
-            instances_to_quarantine[instance_id].append(rule)
+            data = instances_to_quarantine[instance_id]
+            data["rules"].append(rule)
+
+            violation_id = violation.get("violation_id")
+            if (
+                violation_id is not None
+                and violation_id not in data["violation_ids"]
+            ):
+                data["violation_ids"].append(violation_id)
 
         quarantine_results = []
 
@@ -449,10 +460,10 @@ class GuardrailController:
 
         dry_run = self.policy.get("quarantine_dry_run", True)
 
-        for instance_id, rules in instances_to_quarantine.items():
+        for instance_id, data in instances_to_quarantine.items():
             reason = (
                 "Violazioni automatiche: "
-                + ", ".join(sorted(set(rules)))
+                + ", ".join(sorted(set(data["rules"])))
             )
 
             try:
@@ -460,6 +471,7 @@ class GuardrailController:
                     instance_id=instance_id,
                     reason=reason,
                     dry_run=dry_run,
+                    violation_ids=data["violation_ids"],
                 )
 
                 if not isinstance(result, dict):
@@ -535,7 +547,6 @@ class GuardrailController:
                         "severity": "WARNING",
                         "instance_id": f"project:{project_id}:ram",
                         "instance_name": f"[PROJECT] {project_id} (RAM)",
-                        "scan_id": scan_id,
                     })
 
                 if (
@@ -552,7 +563,6 @@ class GuardrailController:
                         "severity": "WARNING",
                         "instance_id": f"project:{project_id}:vcpus",
                         "instance_name": f"[PROJECT] {project_id} (vCPU)",
-                        "scan_id": scan_id,
                     })
 
             # Registrazione delle violazioni.
