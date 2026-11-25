@@ -619,6 +619,15 @@ class GuardrailDatabase:
 
             return [dict(row) for row in rows]
 
+    def count_quarantine_events(self):
+        """Restituisce il numero totale degli eventi registrati."""
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total FROM quarantine_events"
+            ).fetchone()
+
+            return row["total"]
+
 
     # ---------------------------------------------------------
     # AUDIT AMMINISTRATIVO

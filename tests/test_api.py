@@ -65,6 +65,7 @@ class TestGuardrailAPI(unittest.TestCase):
             "quarantine_events",
             response.get_json(),
         )
+        self.assertEqual(response.get_json()["total_count"], 0)
 
     def test_manual_scan(self):
         controller = Mock()

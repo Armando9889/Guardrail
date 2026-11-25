@@ -597,7 +597,7 @@ async function refreshDashboard() {
         $("scans-count").textContent = data.summary.scans_count;
         $("open-count").textContent = data.summary.violations_open;
         $("resolved-count").textContent = data.summary.violations_resolved;
-        $("events-count").textContent = allEvents.length;
+        $("events-count").textContent = eventData.total_count;
 
         const scheduler = data.scheduler;
         const schedulerLabels = {

@@ -214,6 +214,9 @@ def create_app(controller=None, enable_auth=False):
             return jsonify({
                 "quarantine_events": result,
                 "count": len(result),
+                "total_count": (
+                    guardrail.database.count_quarantine_events()
+                ),
             }), 200
 
         except Exception:

@@ -112,6 +112,17 @@ class TestGuardrailDatabase(unittest.TestCase):
         self.assertEqual(violation["quarantine_attempts"], 0)
         self.assertIsNone(violation["quarantine_result"])
 
+    def test_count_quarantine_events_includes_all_events(self):
+        for index in range(3):
+            self.db.record_quarantine_event(
+                instance_id=f"vm-{index}",
+                action="quarantine",
+                result="quarantined",
+            )
+
+        self.assertEqual(self.db.count_quarantine_events(), 3)
+        self.assertEqual(len(self.db.list_quarantine_events(limit=2)), 2)
+
     def test_mark_quarantine_attempt_updates_multiple_violations(self):
         first_id = self.db.record_violation({
             "rule": "R4",
