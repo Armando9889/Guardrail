@@ -144,61 +144,6 @@ interessate.
 L'operazione viene registrata nel database, mantenendo lo storico degli
 eventi di quarantena e ripristino.
 
-### Modalità dry-run e modalità reale
-
-Il parametro `quarantine_dry_run` permette di scegliere tra due modalità
-operative.
-
-Nelle nuove installazioni, Guardrail utilizza la modalità reale per
-impostazione predefinita (`quarantine_dry_run: false`). Per utilizzare
-la modalità simulata, è necessario impostare esplicitamente
-`quarantine_dry_run` a `true`.
-
-**Modalità simulata (`dry-run`):**
-
--   Simula l'esecuzione della quarantena.
--   Registra gli eventi e i risultati dell'operazione.
--   Non modifica effettivamente i Security Group delle porte Neutron.
-
-**Modalità reale:**
-
--   Modifica effettivamente la configurazione dei Security Group
-    attraverso Neutron.
--   Applica il Security Group di quarantena alle porte dell'istanza.
--   Conserva la configurazione originale per consentire il ripristino
-    manuale.
-
-La modalità simulata è prevista nella configurazione predefinita. Per
-abilitare gli interventi effettivi è necessario impostare:
-
-``` json
-{
-  "quarantine_dry_run": false
-}
-```
-
-La modalità reale è stata verificata nell'ambiente DevStack utilizzato
-per lo sviluppo del progetto, sia con un'istanza in stato `SHUTOFF` sia
-con un'istanza in stato `ACTIVE`.
-
-### Verifiche della quarantena reale
-
-Le prove effettuate nell'ambiente OpenStack hanno verificato:
-
--   Rilevamento di una violazione critica associata a una regola
-    abilitata alla quarantena automatica.
--   Individuazione delle porte Neutron associate all'istanza.
--   Applicazione effettiva del Security Group `guardrail-quarantine`.
--   Sostituzione dei Security Group originali sulle porte interessate.
--   Registrazione dell'evento di quarantena nel database.
--   Ripristino dei Security Group originali.
--   Registrazione dell'evento di ripristino.
-
-La procedura è stata verificata sia con una VM in stato `SHUTOFF` sia
-con una VM in stato `ACTIVE`. È stata quindi verificata la modifica
-effettiva della configurazione di rete tramite Neutron anche su
-un'istanza in esecuzione.
-
 ## Architettura
 
 Guardrail è organizzato in componenti modulari, ciascuno responsabile di
@@ -525,7 +470,7 @@ verificare gli interventi effettuati sulle istanze.
 
 ## Test
 
-Il progetto include test automatici per verificare il comportamento dei
+Il progetto include test per verificare il comportamento dei
 principali componenti applicativi.
 
 I test riguardano, tra gli altri:
