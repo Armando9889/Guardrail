@@ -78,6 +78,7 @@ istanze Nova alle policy definite dall'amministratore.
   R8                                  Verifica che il consumo aggregato
                                       di RAM e vCPU del progetto non
                                       superi le soglie configurate.
+                                      
   -----------------------------------------------------------------------
 
 Per R6 sono ammessi i seguenti profili:
@@ -189,6 +190,7 @@ una specifica funzionalità.
 
   `tests/`                            Contiene i test automatici del
                                       progetto.
+                                      
   -----------------------------------------------------------------------
 
 ## Tecnologie utilizzate
@@ -257,6 +259,7 @@ due processi gestiti tramite systemd:
                                            web.
 
   `devstack@guardrail-scheduler.service`   Esegue le scansioni periodiche.
+  
   ----------------------------------------------------------------------------
 
 Per verificare lo stato dei servizi:
@@ -325,6 +328,7 @@ Le principali opzioni disponibili sono:
 
   `project_limits`                    Limiti specifici per singolo
                                       progetto.
+                                      
   -----------------------------------------------------------------------
 
 Esempio di configurazione:
@@ -402,7 +406,8 @@ un utente con ruolo amministrativo.
                                                per la dashboard. 
 
   PUT               `/policy`                  Aggiorna le       Admin
-                                               policy.           
+                                               policy.      
+                                               
   GET               `/audit-events`            Storico degli     Admin
                                                eventi di audit
                                                delle operazioni
