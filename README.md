@@ -403,7 +403,11 @@ un utente con ruolo amministrativo.
 
   PUT               `/policy`                  Aggiorna le       Admin
                                                policy.           
-
+  GET               `/audit-events`            Storico degli     Admin
+                                               eventi di audit
+                                               delle operazioni
+                                               amministrative.  
+  
   --------------------------------------------------------------------------------
 
 L'API è raggiungibile direttamente all'indirizzo:
