@@ -434,8 +434,6 @@ La dashboard permette di:
 -   Consultare gli eventi di quarantena e ripristino.
 -   Avviare scansioni manuali.
 -   Richiedere il ripristino delle istanze in quarantena.
--   Consultare e gestire le policy in base ai privilegi dell'utente.
--   Consultare gli eventi di audit quando autorizzati.
 
 La dashboard è raggiungibile direttamente tramite il servizio Flask:
 
