@@ -31,7 +31,7 @@ Keystone.
 -   Configurazione centralizzata delle policy.
 -   Gestione dei limiti globali e specifici per progetto.
 -   Registrazione dello storico delle scansioni e delle violazioni.
--   Quarantena automatica configurabile per le violazioni critiche.
+-   Quarantena automatica configurabile per le violazioni delle regole R4 e R6.
 -   Applicazione reale dei Security Group Neutron per isolare le
     istanze.
 -   Ripristino manuale dei Security Group originali.
@@ -78,7 +78,7 @@ istanze Nova alle policy definite dall'amministratore.
   R8                                  Verifica che il consumo aggregato
                                       di RAM e vCPU del progetto non
                                       superi le soglie configurate.
-                                      
+
   -----------------------------------------------------------------------
 
 Per R6 sono ammessi i seguenti profili:
@@ -91,7 +91,10 @@ R2 e R3 supportano limiti specifici per progetto, utilizzando i limiti
 globali quando non è presente una configurazione dedicata.
 
 R8 effettua un controllo aggregato delle risorse utilizzate dalle
-istanze appartenenti allo stesso progetto.
+istanze appartenenti allo stesso progetto, verificando il rispetto
+dei limiti complessivi di RAM e vCPU configurati. Le violazioni
+rilevate vengono registrate nel database, ma non possono attivare
+la quarantena automatica, riservata esclusivamente alle regole R4 e R6.
 
 ## Quarantena automatica
 
@@ -190,7 +193,7 @@ una specifica funzionalità.
 
   `tests/`                            Contiene i test automatici del
                                       progetto.
-                                      
+
   -----------------------------------------------------------------------
 
 ## Tecnologie utilizzate
@@ -259,7 +262,7 @@ due processi gestiti tramite systemd:
                                            web.
 
   `devstack@guardrail-scheduler.service`   Esegue le scansioni periodiche.
-  
+
   ----------------------------------------------------------------------------
 
 Per verificare lo stato dei servizi:
@@ -328,7 +331,7 @@ Le principali opzioni disponibili sono:
 
   `project_limits`                    Limiti specifici per singolo
                                       progetto.
-                                      
+
   -----------------------------------------------------------------------
 
 Esempio di configurazione:
@@ -381,38 +384,38 @@ un utente con ruolo amministrativo.
   GET               `/`                        Dashboard web.    Pubblica
 
   GET               `/health`                  Verifica dello    Pubblica
-                                               stato del         
-                                               servizio.         
+                                               stato del
+                                               servizio.
 
   GET               `/auth-info`               Informazioni      Autenticato
-                                               sull'utente       
-                                               autenticato.      
+                                               sull'utente
+                                               autenticato.
 
   POST              `/scan`                    Avvia una         Admin
-                                               scansione         
-                                               manuale.          
+                                               scansione
+                                               manuale.
 
   POST              `/restore/<instance_id>`   Ripristina i      Admin
-                                               Security Group    
-                                               originali di      
-                                               un'istanza.       
+                                               Security Group
+                                               originali di
+                                               un'istanza.
 
   GET               `/quarantine-events`       Storico degli     Autenticato
-                                               eventi di         
-                                               quarantena e      
-                                               ripristino.       
+                                               eventi di
+                                               quarantena e
+                                               ripristino.
 
   GET               `/dashboard-data`          Dati aggregati    Autenticato
-                                               per la dashboard. 
+                                               per la dashboard.
 
   PUT               `/policy`                  Aggiorna le       Admin
-                                               policy.      
-                                               
+                                               policy.
+
   GET               `/audit-events`            Storico degli     Admin
                                                eventi di audit
                                                delle operazioni
-                                               amministrative.  
-  
+                                               amministrative.
+
   --------------------------------------------------------------------------------
 
 L'API è raggiungibile direttamente all'indirizzo:
