@@ -196,56 +196,6 @@ def create_app(controller=None, enable_auth=False):
                 "error": "Impossibile ripristinare l'istanza.",
             }), 500
 
-    @app.route("/scans", methods=["GET"])
-    @require_identity()
-    def scans():
-        try:
-            limit = request.args.get("limit", default=50, type=int)
-
-            if limit < 1 or limit > 500:
-                return jsonify({
-                    "error": "Il parametro limit deve essere tra 1 e 500."
-                }), 400
-
-            result = guardrail.database.list_scans(limit=limit)
-
-            return jsonify({
-                "scans": result,
-                "count": len(result),
-            }), 200
-
-        except Exception:
-            LOG.exception("Errore durante il recupero delle scansioni")
-
-            return jsonify({
-                "error": "Impossibile recuperare le scansioni."
-            }), 500
-
-    @app.route("/violations", methods=["GET"])
-    @require_identity()
-    def violations():
-        try:
-            status = request.args.get("status")
-
-            if status and status not in ("open", "resolved"):
-                return jsonify({
-                    "error": "status deve essere open oppure resolved."
-                }), 400
-
-            result = guardrail.database.list_violations(status=status)
-
-            return jsonify({
-                "violations": result,
-                "count": len(result),
-            }), 200
-
-        except Exception:
-            LOG.exception("Errore durante il recupero delle violazioni")
-
-            return jsonify({
-                "error": "Impossibile recuperare le violazioni."
-            }), 500
-
     @app.route("/quarantine-events", methods=["GET"])
     @require_identity()
     def quarantine_events():
@@ -371,18 +321,6 @@ def create_app(controller=None, enable_auth=False):
                 "error": "Impossibile recuperare i dati della dashboard."
             }), 500
 
-    @app.route("/policy", methods=["GET"])
-    @require_identity()
-    def get_policy():
-        try:
-            policy = guardrail.reload_policy()
-            return jsonify({"policy": policy}), 200
-        except Exception:
-            LOG.exception("Errore durante il recupero della policy")
-            return jsonify({
-                "error": "Impossibile recuperare la policy."
-            }), 500
-
     @app.route("/policy", methods=["PUT"])
     @require_identity(admin=True)
     def update_policy():
@@ -433,32 +371,6 @@ def create_app(controller=None, enable_auth=False):
             LOG.exception("Errore durante l'aggiornamento della policy")
             return jsonify({
                 "error": "Impossibile aggiornare la policy."
-            }), 500
-
-    @app.route("/audit-events", methods=["GET"])
-    @require_identity(admin=True)
-    def audit_events():
-        try:
-            limit = request.args.get("limit", default=50, type=int)
-
-            if limit < 1 or limit > 500:
-                return jsonify({
-                    "error": "Il parametro limit deve essere tra 1 e 500."
-                }), 400
-
-            events = guardrail.database.list_admin_audit_events(
-                limit=limit
-            )
-
-            return jsonify({
-                "audit_events": events,
-                "count": len(events),
-            }), 200
-
-        except Exception:
-            LOG.exception("Errore durante il recupero degli eventi audit")
-            return jsonify({
-                "error": "Impossibile recuperare gli eventi audit."
             }), 500
 
     return app

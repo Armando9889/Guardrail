@@ -393,14 +393,6 @@ un utente con ruolo amministrativo.
                                                originali di      
                                                un'istanza.       
 
-  GET               `/scans`                   Elenco delle      Autenticato
-                                               scansioni         
-                                               eseguite.         
-
-  GET               `/violations`              Elenco delle      Autenticato
-                                               violazioni        
-                                               rilevate.         
-
   GET               `/quarantine-events`       Storico degli     Autenticato
                                                eventi di         
                                                quarantena e      
@@ -409,15 +401,9 @@ un utente con ruolo amministrativo.
   GET               `/dashboard-data`          Dati aggregati    Autenticato
                                                per la dashboard. 
 
-  GET               `/policy`                  Consulta la       Autenticato
-                                               configurazione    
-                                               delle policy.     
-
   PUT               `/policy`                  Aggiorna le       Admin
                                                policy.           
 
-  GET               `/audit-events`            Consulta gli      Admin
-                                               eventi di audit.  
   --------------------------------------------------------------------------------
 
 L'API è raggiungibile direttamente all'indirizzo:

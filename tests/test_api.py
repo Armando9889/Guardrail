@@ -57,18 +57,6 @@ class TestGuardrailAPI(unittest.TestCase):
             "healthy",
         )
 
-    def test_list_scans(self):
-        response = self.client.get("/scans")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("scans", response.get_json())
-
-    def test_list_violations(self):
-        response = self.client.get("/violations")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("violations", response.get_json())
-
     def test_list_quarantine_events(self):
         response = self.client.get("/quarantine-events")
 
@@ -77,18 +65,6 @@ class TestGuardrailAPI(unittest.TestCase):
             "quarantine_events",
             response.get_json(),
         )
-
-    def test_invalid_scan_limit(self):
-        response = self.client.get("/scans?limit=1000")
-
-        self.assertEqual(response.status_code, 400)
-
-    def test_invalid_violation_status(self):
-        response = self.client.get(
-            "/violations?status=invalid"
-        )
-
-        self.assertEqual(response.status_code, 400)
 
     def test_manual_scan(self):
         controller = Mock()
@@ -402,24 +378,6 @@ class TestGuardrailAPI(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
         controller.save_policy.assert_not_called()
-
-    def test_admin_audit_events_rejects_non_admin_user(self):
-        controller = Mock()
-        app = create_app(controller, enable_auth=True)
-        app.config["TESTING"] = True
-
-        response = app.test_client().get(
-            "/audit-events",
-            headers={
-                "X-Identity-Status": "Confirmed",
-                "X-User-Id": "user-123",
-                "X-Roles": "member",
-            },
-        )
-
-        self.assertEqual(response.status_code, 403)
-        controller.database.list_admin_audit_events.assert_not_called()
-
 
 if __name__ == "__main__":
     unittest.main()
