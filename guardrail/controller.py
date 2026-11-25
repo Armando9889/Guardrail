@@ -457,7 +457,6 @@ class GuardrailController:
             return quarantine_results
 
         quarantine_manager = self._get_quarantine_manager()
-
         dry_run = self.policy.get("quarantine_dry_run", True)
 
         for instance_id, data in instances_to_quarantine.items():
@@ -471,7 +470,6 @@ class GuardrailController:
                     instance_id=instance_id,
                     reason=reason,
                     dry_run=dry_run,
-                    violation_ids=data["violation_ids"],
                 )
 
                 if not isinstance(result, dict):
@@ -480,19 +478,31 @@ class GuardrailController:
                         "result": "completed",
                     }
 
-                quarantine_results.append(result)
-
             except Exception as exc:
                 LOG.exception(
                     "Errore durante la quarantena dell'istanza %s.",
                     instance_id,
                 )
 
-                quarantine_results.append({
+                result = {
                     "instance_id": instance_id,
                     "result": "failed",
                     "error": str(exc),
-                })
+                }
+
+            try:
+                self.database.mark_quarantine_attempt(
+                    data["violation_ids"],
+                    result.get("result") or "completed",
+                )
+            except Exception:
+                LOG.exception(
+                    "Impossibile aggiornare le violazioni dopo "
+                    "la quarantena dell'istanza %s.",
+                    instance_id,
+                )
+
+            quarantine_results.append(result)
 
         return quarantine_results
 

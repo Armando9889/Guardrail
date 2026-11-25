@@ -126,27 +126,6 @@ class GuardrailDatabase:
                 );
             """)
 
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS quarantine_event_violations (
-                    event_id INTEGER NOT NULL,
-                    violation_id INTEGER NOT NULL,
-                    PRIMARY KEY (event_id, violation_id),
-                    FOREIGN KEY (event_id)
-                        REFERENCES quarantine_events(id),
-                    FOREIGN KEY (violation_id)
-                        REFERENCES violations(id)
-                )
-            """)
-
-            # Migrazione degli eventuali collegamenti già presenti.
-            conn.execute("""
-                INSERT OR IGNORE INTO quarantine_event_violations (
-                    event_id, violation_id
-                )
-                SELECT id, violation_id
-                FROM quarantine_events
-                WHERE violation_id IS NOT NULL
-            """)
 
             columns = {
                 row["name"]
@@ -452,31 +431,9 @@ class GuardrailDatabase:
         instance_id,
         action,
         result,
-        violation_id=None,
         details=None,
-        violation_ids=None,
     ):
-        """Registra un evento e le violazioni automatiche associate."""
-        linked_ids = []
-
-        if violation_id is not None:
-            linked_ids.append(violation_id)
-
-        if violation_ids is not None:
-            if not isinstance(violation_ids, (list, tuple, set)):
-                raise ValueError("violation_ids deve essere una lista di ID")
-
-            linked_ids.extend(violation_ids)
-
-        linked_ids = list(dict.fromkeys(linked_ids))
-
-        for linked_id in linked_ids:
-            if (
-                not isinstance(linked_id, int)
-                or isinstance(linked_id, bool)
-                or linked_id < 1
-            ):
-                raise ValueError("Ogni violation_id deve essere positivo")
+        """Registra un evento di quarantena o ripristino."""
 
         now = utc_now()
 
@@ -487,10 +444,9 @@ class GuardrailDatabase:
                     violation_id, instance_id, action,
                     result, details, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (NULL, ?, ?, ?, ?, ?)
                 """,
                 (
-                    linked_ids[0] if linked_ids else None,
                     str(instance_id),
                     str(action),
                     str(result),
@@ -499,36 +455,11 @@ class GuardrailDatabase:
                 ),
             )
 
-            event_id = cursor.lastrowid
-
-            if linked_ids:
-                conn.executemany(
-                    """
-                    INSERT OR IGNORE INTO quarantine_event_violations (
-                        event_id, violation_id
-                    )
-                    VALUES (?, ?)
-                    """,
-                    [(event_id, item) for item in linked_ids],
-                )
-
-            # Un evento di ripristino non è un tentativo di quarantena.
-            if str(action) == "quarantine":
-                for linked_id in linked_ids:
-                    conn.execute(
-                        """
-                        UPDATE violations
-                        SET quarantine_attempts = quarantine_attempts + 1,
-                            quarantine_result = ?
-                        WHERE id = ?
-                        """,
-                        (str(result), linked_id),
-                    )
-
-            return event_id
+            return cursor.lastrowid
 
     def update_quarantine_event(self, event_id, result, details=None):
-        """Aggiorna l'evento e l'esito delle violazioni associate."""
+        """Aggiorna esclusivamente i dati dell'evento."""
+
         if (
             not isinstance(event_id, int)
             or isinstance(event_id, bool)
@@ -553,42 +484,38 @@ class GuardrailDatabase:
             if cursor.rowcount == 0:
                 raise ValueError(f"Evento inesistente: {event_id}")
 
-            event = conn.execute(
+    def mark_quarantine_attempt(self, violation_ids, result):
+        """Aggiorna tentativi ed esito delle violazioni associate."""
+
+        if not violation_ids:
+            return
+
+        if not isinstance(violation_ids, (list, tuple, set)):
+            raise ValueError("violation_ids deve essere una lista di ID")
+
+        unique_ids = list(dict.fromkeys(violation_ids))
+
+        for violation_id in unique_ids:
+            if (
+                not isinstance(violation_id, int)
+                or isinstance(violation_id, bool)
+                or violation_id < 1
+            ):
+                raise ValueError("Ogni violation_id deve essere positivo")
+
+        with self.connection() as conn:
+            conn.executemany(
                 """
-                SELECT action, violation_id
-                FROM quarantine_events
+                UPDATE violations
+                SET quarantine_attempts = quarantine_attempts + 1,
+                    quarantine_result = ?
                 WHERE id = ?
                 """,
-                (event_id,),
-            ).fetchone()
-
-            if event["action"] == "quarantine":
-                rows = conn.execute(
-                    """
-                    SELECT violation_id
-                    FROM quarantine_event_violations
-                    WHERE event_id = ?
-                    """,
-                    (event_id,),
-                ).fetchall()
-
-                linked_ids = {
-                    row["violation_id"] for row in rows
-                }
-
-                # Compatibilità con gli eventi precedenti alla migrazione.
-                if event["violation_id"] is not None:
-                    linked_ids.add(event["violation_id"])
-
-                for linked_id in linked_ids:
-                    conn.execute(
-                        """
-                        UPDATE violations
-                        SET quarantine_result = ?
-                        WHERE id = ?
-                        """,
-                        (str(result), linked_id),
-                    )
+                [
+                    (str(result), violation_id)
+                    for violation_id in unique_ids
+                ],
+            )
 
     def get_instance_quarantine_events(self, instance_id):
         """Recupera tutti gli eventi di una VM in ordine cronologico."""

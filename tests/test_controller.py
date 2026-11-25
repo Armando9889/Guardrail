@@ -277,13 +277,15 @@ class TestGuardrailController(unittest.TestCase):
         )
 
         self.assertEqual(call_kwargs["instance_id"], "vm-123")
-        self.assertCountEqual(
-            call_kwargs["violation_ids"],
-            [
-                violation["violation_id"]
-                for violation in automatic_violations
-            ],
-        )
+        stored_violations = {
+            item["id"]: item
+            for item in self.controller.database.list_violations()
+        }
+
+        for violation in automatic_violations:
+            stored = stored_violations[violation["violation_id"]]
+            self.assertEqual(stored["quarantine_attempts"], 1)
+            self.assertEqual(stored["quarantine_result"], "dry_run")
 
         self.assertEqual(len(result["quarantine_results"]), 1)
 
@@ -376,6 +378,22 @@ class TestGuardrailController(unittest.TestCase):
             result["quarantine_results"][0]["result"],
             "failed",
         )
+
+        failed_violations = [
+            violation
+            for violation in result["violations"]
+            if violation.get("rule") in ("R4", "R6")
+        ]
+
+        stored_violations = {
+            item["id"]: item
+            for item in self.controller.database.list_violations()
+        }
+
+        for violation in failed_violations:
+            stored = stored_violations[violation["violation_id"]]
+            self.assertEqual(stored["quarantine_attempts"], 1)
+            self.assertEqual(stored["quarantine_result"], "failed")
 
     def test_dry_run_is_passed_to_quarantine_manager(self):
         server = self._server(image_id="unauthorized-image")

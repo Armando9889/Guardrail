@@ -98,18 +98,21 @@ class TestGuardrailDatabase(unittest.TestCase):
             instance_id="vm-002",
             action="quarantine",
             result="success",
-            violation_id=violation_id,
         )
 
         events = self.db.list_quarantine_events()
-        violation = self.db.list_violations()[0]
+        violations = {
+            item["id"]: item
+            for item in self.db.list_violations()
+        }
+        violation = violations[violation_id]
 
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["result"], "success")
-        self.assertEqual(violation["quarantine_attempts"], 1)
-        self.assertEqual(violation["quarantine_result"], "success")
+        self.assertEqual(violation["quarantine_attempts"], 0)
+        self.assertIsNone(violation["quarantine_result"])
 
-    def test_quarantine_event_links_multiple_violations(self):
+    def test_mark_quarantine_attempt_updates_multiple_violations(self):
         first_id = self.db.record_violation({
             "rule": "R4",
             "instance_id": "vm-multi",
@@ -126,28 +129,15 @@ class TestGuardrailDatabase(unittest.TestCase):
             "severity": "high",
         })
 
-        event_id = self.db.record_quarantine_event(
-            instance_id="vm-multi",
-            action="quarantine",
-            result="pending",
-            violation_ids=[first_id, second_id],
-        )
-
-        self.db.update_quarantine_event(
-            event_id,
+        self.db.mark_quarantine_attempt(
+            [first_id, second_id],
             "quarantined",
-            {"ports": []},
         )
 
-        events = self.db.list_quarantine_events()
         violations = {
             item["id"]: item
             for item in self.db.list_violations()
         }
-
-        self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["id"], event_id)
-        self.assertEqual(events[0]["result"], "quarantined")
 
         for violation_id in (first_id, second_id):
             self.assertEqual(
@@ -158,21 +148,6 @@ class TestGuardrailDatabase(unittest.TestCase):
                 violations[violation_id]["quarantine_result"],
                 "quarantined",
             )
-
-        with self.db.connection() as conn:
-            links = conn.execute(
-                """
-                SELECT violation_id
-                FROM quarantine_event_violations
-                WHERE event_id = ?
-                """,
-                (event_id,),
-            ).fetchall()
-
-        self.assertCountEqual(
-            [row["violation_id"] for row in links],
-            [first_id, second_id],
-        )
 
     def test_get_restore_events_after_quarantine(self):
         quarantine_id = self.db.record_quarantine_event(

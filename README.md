@@ -121,8 +121,15 @@ abilitate, il componente `QuarantineManager`:
 
 Il Security Group `guardrail-quarantine` deve contenere esattamente
 una regola: SSH TCP sulla porta 22, IPv4, in ingresso (`ingress`), con
-sorgente costituita da un singolo indirizzo IPv4 con prefisso `/32`.
-Non sono ammesse ulteriori regole, comprese quelle in uscita (`egress`).
+sorgente costituita dall'indirizzo IPv4 amministrativo previsto
+dall'ambiente, con prefisso `/32`. Il Security Group deve essere creato e
+configurato preventivamente dall'amministratore. Non sono ammesse ulteriori
+regole, comprese quelle in uscita (`egress`).
+
+La quarantena modifica i Security Group delle porte Neutron, senza arrestare
+né eliminare la VM. In modalità simulazione (`quarantine_dry_run: true`)
+l'operazione viene registrata senza modificare effettivamente le porte;
+in modalità reale vengono applicate le modifiche di rete.
 
 Prima di modificare le porte Neutron, Guardrail verifica la configurazione
 del gruppo. Se il gruppo non esiste, non è possibile recuperarne le regole
@@ -226,7 +233,7 @@ Inserire il plugin nella configurazione DevStack, modificando
 `local.conf`:
 
 ``` ini
-enable_plugin guardrail-lite https://github.com/Armando9889/Guardrail.git main
+enable_plugin guardrail https://github.com/Armando9889/Guardrail.git main
 ```
 
 Avviare DevStack:
