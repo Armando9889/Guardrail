@@ -527,30 +527,30 @@ class TestGuardrailController(unittest.TestCase):
             all(violation["status"] == "resolved" for violation in stored)
         )
 
+    def test_only_r4_and_r6_are_valid_automatic_quarantine_rules(self):
+        invalid_rules = ["R1", "R2", "R3", "R5", "R7", "R8", "R9"]
+
+        for rule in invalid_rules:
+            with self.subTest(rule=rule):
+                policy = dict(self.policy)
+                policy["auto_quarantine_rules"] = [rule]
+
+                with self.assertRaises(ValueError):
+                    GuardrailController._validate_policy(policy)
+
     def test_r8_never_triggers_quarantine(self):
-        self.policy["auto_quarantine_rules"] = ["R8"]
-        self._write_config()
+        # Simula una policy non valida che abbia superato la validazione.
+        self.controller.policy["auto_quarantine_rules"] = ["R8"]
 
-        controller = GuardrailController(
-            config_path=self.config_path,
-            db_path=str(self.db_path),
-            connection=self.connection,
-            quarantine_manager=self.quarantine_manager,
-        )
+        results = self.controller._apply_quarantine([
+            {
+                "rule": "R8",
+                "instance_id": "vm-123",
+                "violation_id": 1,
+            }
+        ])
 
-        server = self._server()
-        server.flavor = {
-            "id": "flavor-1",
-            "ram": 9216,
-            "vcpus": 9,
-        }
-
-        self._prepare_scan([server])
-
-        result = controller.scan()
-
-        self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["quarantine_results"], [])
+        self.assertEqual(results, [])
         self.quarantine_manager.quarantine_instance.assert_not_called()
 
     def test_r7_persists_after_controller_restart(self):

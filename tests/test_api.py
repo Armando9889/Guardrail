@@ -380,5 +380,77 @@ class TestGuardrailAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         controller.save_policy.assert_not_called()
 
+
+    def test_admin_audit_events_returns_records(self):
+        controller = Mock()
+        controller.database.list_admin_audit_events.return_value = [
+            {
+                "id": 1,
+                "actor_name": "Test Admin",
+                "action": "manual_scan",
+                "resource": "instances",
+            }
+        ]
+
+        app = create_app(controller, enable_auth=True)
+        app.config["TESTING"] = True
+
+        response = app.test_client().get(
+            "/audit-events?limit=20",
+            headers={
+                "X-Identity-Status": "Confirmed",
+                "X-User-Id": "admin-123",
+                "X-Roles": "member, admin",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(
+            data["audit_events"][0]["action"],
+            "manual_scan",
+        )
+        controller.database.list_admin_audit_events.assert_called_once_with(
+            limit=20
+        )
+
+    def test_admin_audit_events_rejects_non_admin(self):
+        controller = Mock()
+        app = create_app(controller, enable_auth=True)
+        app.config["TESTING"] = True
+
+        response = app.test_client().get(
+            "/audit-events",
+            headers={
+                "X-Identity-Status": "Confirmed",
+                "X-User-Id": "user-123",
+                "X-Roles": "member",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        controller.database.list_admin_audit_events.assert_not_called()
+
+    def test_admin_audit_events_requires_identity(self):
+        controller = Mock()
+        app = create_app(controller, enable_auth=True)
+        app.config["TESTING"] = True
+
+        response = app.test_client().get("/audit-events")
+
+        self.assertEqual(response.status_code, 401)
+        controller.database.list_admin_audit_events.assert_not_called()
+
+    def test_admin_audit_events_rejects_invalid_limit(self):
+        controller = Mock()
+        app = create_app(controller)
+        app.config["TESTING"] = True
+
+        response = app.test_client().get("/audit-events?limit=501")
+
+        self.assertEqual(response.status_code, 400)
+        controller.database.list_admin_audit_events.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()

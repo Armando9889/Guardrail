@@ -229,6 +229,36 @@ def create_app(controller=None, enable_auth=False):
             }), 500
 
 
+    @app.route("/audit-events", methods=["GET"])
+    @require_identity(admin=True)
+    def audit_events():
+        """Restituisce lo storico delle operazioni amministrative."""
+        try:
+            limit = request.args.get("limit", default=50, type=int)
+
+            if limit < 1 or limit > 500:
+                return jsonify({
+                    "error": "Il parametro limit deve essere tra 1 e 500."
+                }), 400
+
+            result = guardrail.database.list_admin_audit_events(
+                limit=limit
+            )
+
+            return jsonify({
+                "audit_events": result,
+                "count": len(result),
+            }), 200
+
+        except Exception:
+            LOG.exception(
+                "Errore durante il recupero degli eventi audit"
+            )
+            return jsonify({
+                "error": "Impossibile recuperare gli eventi audit."
+            }), 500
+
+
     @app.route("/", methods=["GET"])
     def dashboard():
         """Mostra la dashboard web di Guardrail."""
@@ -299,7 +329,6 @@ def create_app(controller=None, enable_auth=False):
                         1 for item in violations
                         if item.get("status") == "resolved"
                     ),
-                    "quarantine_events_count": len(events),
                 },
                 "scheduler": {
                     "status": scheduler_status,

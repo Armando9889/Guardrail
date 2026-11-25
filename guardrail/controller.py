@@ -163,20 +163,17 @@ class GuardrailController:
             raise ValueError(f"name_pattern non valida: {exc}") from exc
 
         auto_rules = policy["auto_quarantine_rules"]
-        valid_rules = {
-            "R1", "R2", "R3", "R4",
-            "R5", "R6", "R7", "R8",
-        }
+        allowed_auto_rules = {"R4", "R6"}
 
         if not isinstance(auto_rules, list):
             raise ValueError("auto_quarantine_rules deve essere una lista.")
 
         if any(
-            not isinstance(rule, str) or rule not in valid_rules
+            not isinstance(rule, str) or rule not in allowed_auto_rules
             for rule in auto_rules
         ):
             raise ValueError(
-                "auto_quarantine_rules contiene una regola non valida."
+                "auto_quarantine_rules può contenere soltanto R4 e R6."
             )
 
         security_group = policy["quarantine_security_group"]
@@ -414,8 +411,10 @@ class GuardrailController:
     def _apply_quarantine(self, violations):
         """Applica la quarantena solo alle regole autorizzate."""
 
-        auto_rules = set(
-            self.policy.get("auto_quarantine_rules", [])
+        # Difesa aggiuntiva: solo R4 e R6 possono avviare la quarantena.
+        auto_rules = (
+            set(self.policy.get("auto_quarantine_rules", []))
+            & {"R4", "R6"}
         )
 
         instances_to_quarantine = {}
