@@ -1,0 +1,877 @@
+{% extends "base.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Guardrail" %}{% endblock %}
+
+{% block css %}
+  {{ block.super }}
+  <style>
+#guardrail-dashboard {
+
+    --bg: #f3f6fb;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #718096;
+    --line: #e6ebf2;
+    --blue: #315efb;
+    --green: #15966b;
+    --red: #d94b58;
+    --orange: #d58a25;
+    --sidebar: #111b2e;
+
+}
+#guardrail-dashboard * {
+ box-sizing: border-box;
+}
+#guardrail-dashboard {
+
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+}
+#guardrail-dashboard .nav-item.active {
+ background: #263958; color: white;
+}
+#guardrail-dashboard .guardrail-content {
+ flex: 1; min-width: 0; padding: 30px 36px 45px;
+}
+#guardrail-dashboard .guardrail-topbar {
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 28px;
+
+}
+#guardrail-dashboard h1 {
+ margin: 0; font-size: 25px; letter-spacing: -.7px;
+}
+#guardrail-dashboard .description {
+ color: var(--muted); font-size: 13px; margin-top: 7px;
+}
+#guardrail-dashboard .actions {
+ display: flex; align-items: center; gap: 12px;
+}
+#guardrail-dashboard .auth-panel {
+
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+
+}
+#guardrail-dashboard .auth-panel input {
+
+    width: 190px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+
+}
+#guardrail-dashboard .auth-status {
+
+    font-size: 11px;
+    color: var(--muted);
+
+}
+#guardrail-dashboard button {
+
+    border: 0;
+    background: var(--blue);
+    color: white;
+    padding: 11px 17px;
+    border-radius: 8px;
+    font-weight: 650;
+    cursor: pointer;
+
+}
+#guardrail-dashboard button:disabled {
+ opacity: .6; cursor: wait;
+}
+#guardrail-dashboard .restore-button {
+
+    background: #15966b;
+    padding: 7px 10px;
+    font-size: 10px;
+    white-space: nowrap;
+
+}
+#guardrail-dashboard .restore-button:hover {
+ background: #117653;
+}
+#guardrail-dashboard .refresh {
+ color: var(--muted); font-size: 11px;
+}
+#guardrail-dashboard .grid {
+
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+
+}
+#guardrail-dashboard .card, #guardrail-dashboard .panel {
+
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(30, 50, 80, .025);
+
+}
+#guardrail-dashboard .card {
+ padding: 19px;
+}
+#guardrail-dashboard .card-label {
+ color: var(--muted); font-size: 12px;
+}
+#guardrail-dashboard .card-value {
+ font-size: 29px; font-weight: 750; margin-top: 13px;
+}
+#guardrail-dashboard .card-note {
+ color: var(--muted); font-size: 11px; margin-top: 5px;
+}
+#guardrail-dashboard .content-grid {
+
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(290px, 1fr);
+    gap: 18px;
+    margin-bottom: 18px;
+
+}
+#guardrail-dashboard .panel {
+ padding: 20px; min-width: 0;
+}
+#guardrail-dashboard .panel-header {
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 17px;
+
+}
+#guardrail-dashboard h2 {
+ font-size: 15px; margin: 0;
+}
+#guardrail-dashboard .panel-subtitle {
+ color: var(--muted); font-size: 11px; margin-top: 5px;
+}
+#guardrail-dashboard .badge {
+
+    display: inline-block;
+    border-radius: 20px;
+    padding: 5px 9px;
+    font-size: 10px;
+    font-weight: 700;
+    background: #edf1f7;
+    color: #59677d;
+
+}
+#guardrail-dashboard .badge.green {
+ background: #e5f6ef; color: #16805e;
+}
+#guardrail-dashboard .badge.red {
+ background: #fff0f0; color: #c43f4c;
+}
+#guardrail-dashboard .badge.orange {
+ background: #fff5e5; color: #a96a13;
+}
+#guardrail-dashboard .status-row {
+
+    display: flex;
+    justify-content: space-between;
+    gap: 15px;
+    padding: 13px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 12px;
+
+}
+#guardrail-dashboard .status-row:last-child {
+ border-bottom: 0;
+}
+#guardrail-dashboard .status-row span:first-child {
+ color: var(--muted);
+}
+#guardrail-dashboard .status-row strong {
+ text-align: right;
+}
+#guardrail-dashboard .table-wrap {
+ overflow-x: auto;
+}
+#guardrail-dashboard table {
+ width: 100%; border-collapse: collapse; font-size: 11px;
+}
+#guardrail-dashboard th {
+
+    text-align: left;
+    color: var(--muted);
+    font-weight: 650;
+    padding: 10px 9px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+
+}
+#guardrail-dashboard td {
+
+    padding: 12px 9px;
+    border-bottom: 1px solid #f0f2f6;
+    vertical-align: top;
+
+}
+#guardrail-dashboard tbody tr:last-child td {
+ border-bottom: 0;
+}
+#guardrail-dashboard .empty {
+ color: var(--muted); text-align: center; padding: 22px;
+}
+#guardrail-dashboard .bottom-grid {
+ display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
+}
+#guardrail-dashboard .footer-note {
+ color: var(--muted); font-size: 10px; margin-top: 20px;
+}
+@media(max-width: 1050px) {
+#guardrail-dashboard .grid {
+ grid-template-columns: repeat(2, 1fr);
+}
+#guardrail-dashboard .content-grid {
+ grid-template-columns: 1fr;
+}
+
+
+}
+@media(max-width: 700px) {
+#guardrail-dashboard .guardrail-content {
+ padding: 22px 15px;
+}
+#guardrail-dashboard .guardrail-topbar {
+ align-items: flex-start; flex-direction: column;
+}
+#guardrail-dashboard .grid, #guardrail-dashboard .bottom-grid {
+ grid-template-columns: 1fr;
+}
+
+
+}
+  </style>
+{% endblock %}
+
+{% block main %}
+<div id="guardrail-dashboard">
+  <div class="guardrail-content">
+<header class="guardrail-topbar">
+        <div>
+            <h1>Panoramica</h1>
+            <div class="description">Monitoraggio della conformità delle istanze OpenStack.</div>
+        </div>
+        <div class="actions">
+            <span class="refresh" id="last-refresh">Aggiornamento in attesa</span>
+            <div class="auth-panel">
+                <span class="auth-status" id="auth-status">
+                    Verifica sessione Horizon...
+                </span>
+            </div>
+            <button id="scan-button" onclick="manualScan()" hidden>
+                Avvia scansione
+            </button>
+        </div>
+    </header>
+
+    <section class="grid">
+        <div class="card">
+            <div class="card-label">Scansioni registrate</div>
+            <div class="card-value" id="scans-count">—</div>
+            <div class="card-note">Ultime 100 scansioni</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Violazioni aperte</div>
+            <div class="card-value" id="open-count">—</div>
+            <div class="card-note">Non ancora risolte</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Violazioni risolte</div>
+            <div class="card-value" id="resolved-count">—</div>
+            <div class="card-note">Conformità ripristinata</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Eventi di quarantena</div>
+            <div class="card-value" id="events-count">—</div>
+            <div class="card-note">Eventi registrati nel database</div>
+        </div>
+    </section>
+
+    <section class="content-grid">
+        <div class="panel">
+            <div class="panel-header">
+                <div>
+                    <h2>Stato del servizio</h2>
+                    <div class="panel-subtitle">API, scansioni periodiche e modalità operativa</div>
+                </div>
+                <span class="badge green" id="api-status">API</span>
+            </div>
+            <div class="status-row"><span>API Guardrail</span><strong id="api-detail">Verifica...</strong></div>
+            <div class="status-row"><span>Heartbeat scansioni automatiche</span><strong id="scheduler-status">Verifica...</strong></div>
+            <div class="status-row"><span>Ultima scansione automatica</span><strong id="last-auto">—</strong></div>
+            <div class="status-row"><span>Prossima scansione prevista</span><strong id="next-auto">—</strong></div>
+            <div class="status-row"><span>Intervallo configurato</span><strong id="interval">—</strong></div>
+            <div class="status-row"><span>Modalità simulazione quarantena</span><strong id="dry-run">—</strong></div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <div>
+                    <h2>Ultime scansioni</h2>
+                    <div class="panel-subtitle">Origine e risultato dei controlli</div>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>ID</th><th>Origine</th><th>Stato</th><th>Violazioni</th></tr></thead>
+                    <tbody id="recent-scans"><tr><td colspan="4" class="empty">Caricamento...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel" style="margin-bottom:18px">
+        <div class="panel-header">
+            <div>
+                <h2>Violazioni di conformità</h2>
+                <div class="panel-subtitle">Regole applicate alle istanze e ai progetti</div>
+            </div>
+            <span class="badge" id="violation-total">0 record</span>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Regola</th><th>Istanza / progetto</th><th>Messaggio</th><th>Severità</th><th>Stato</th><th>Ultimo rilevamento</th></tr></thead>
+                <tbody id="violations-table"><tr><td colspan="6" class="empty">Caricamento...</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="bottom-grid">
+        <div class="panel">
+            <div class="panel-header">
+                <div>
+                    <h2>Eventi di quarantena</h2>
+                    <div class="panel-subtitle">
+                        Storico degli isolamenti e dei ripristini manuali
+                    </div>
+                </div>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Istanza</th>
+                            <th>Azione</th>
+                            <th>Risultato</th>
+                            <th>Intervento</th>
+                        </tr>
+                    </thead>
+                    <tbody id="events-table">
+                        <tr><td colspan="5" class="empty">Caricamento...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="panel-header"><h2>Informazioni operative</h2></div>
+            <div class="status-row"><span>Interfaccia</span><strong>Guardrail Dashboard</strong></div>
+            <div class="status-row"><span>Backend</span><strong>Flask REST API</strong></div>
+            <div class="status-row"><span>Persistenza</span><strong>SQLite</strong></div>
+            <div class="status-row"><span>Monitoraggio</span><strong>Aggiornamento ogni 15 s</strong></div>
+            <div class="status-row"><span>Intervento sulle VM</span><strong>Ripristino manuale · Admin</strong></div>
+        </div>
+    </section>
+
+    <div class="footer-note">
+        Guardrail · I dati visualizzati provengono dal database del servizio.
+        Lo stato dello scheduler è stimato sulla frequenza delle scansioni automatiche.
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;",
+        '"': "&quot;", "'": "&#39;"
+    })[char]);
+}
+
+function formatDate(value) {
+    if (!value) return "—";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? escapeHtml(value) :
+        date.toLocaleString("it-IT");
+}
+
+function badge(value) {
+    const text = String(value ?? "—");
+    let cls = "";
+    if (["open", "critical", "failed", "error", "stale"].includes(text.toLowerCase())) cls = "red";
+    else if (["resolved", "completed", "active", "dry_run"].includes(text.toLowerCase())) cls = "green";
+    else if (["medium", "high", "waiting"].includes(text.toLowerCase())) cls = "orange";
+    return `<span class="badge ${cls}">${escapeHtml(text)}</span>`;
+}
+
+let isAdmin = false;
+let isAuthenticated = false;
+
+function getActiveQuarantines(events) {
+    const active = new Map();
+
+    // Gli eventi API arrivano in ordine decrescente:
+    // li elaboriamo dal più vecchio al più recente.
+    const ordered = [...events].sort(
+        (a, b) => Number(a.id) - Number(b.id)
+    );
+
+    for (const event of ordered) {
+        let details = event.details;
+
+        if (typeof details === "string") {
+            try {
+                details = JSON.parse(details);
+            } catch {
+                continue;
+            }
+        }
+
+        if (!details || !Array.isArray(details.ports)) {
+            continue;
+        }
+
+        if (
+            event.action === "quarantine" &&
+            ["quarantined", "partial"].includes(event.result)
+        ) {
+            for (const port of details.ports) {
+                if (
+                    !["quarantined", "already_quarantined"].includes(
+                        port.status
+                    )
+                ) {
+                    continue;
+                }
+
+                if (port.port_id) {
+                    if (!active.has(event.instance_id)) {
+                        active.set(event.instance_id, new Set());
+                    }
+
+                    active.get(event.instance_id).add(
+                        String(port.port_id)
+                    );
+                }
+            }
+        }
+
+        if (
+            event.action === "restore" &&
+            ["restored", "partial"].includes(event.result)
+        ) {
+            for (const port of details.ports) {
+                if (
+                    port.status === "restored" &&
+                    port.port_id &&
+                    active.has(event.instance_id)
+                ) {
+                    active.get(event.instance_id).delete(
+                        String(port.port_id)
+                    );
+
+                    if (active.get(event.instance_id).size === 0) {
+                        active.delete(event.instance_id);
+                    }
+                }
+            }
+        }
+    }
+
+    return new Set(active.keys());
+}
+
+function clearAuthentication(message = "Sessione non valida") {
+    isAuthenticated = false;
+    isAdmin = false;
+
+    $("auth-status").textContent = message;
+    $("scan-button").hidden = true;
+
+    const placeholders = {
+        "scans-count": "—",
+        "open-count": "—",
+        "resolved-count": "—",
+        "events-count": "—",
+        "api-detail": "Autenticazione richiesta",
+        "scheduler-status": "—",
+        "last-auto": "—",
+        "next-auto": "—",
+        "interval": "—",
+        "dry-run": "—",
+        "violation-total": "0 record",
+        "last-refresh": "Aggiornamento in attesa"
+    };
+
+    for (const [id, value] of Object.entries(placeholders)) {
+        $(id).textContent = value;
+    }
+
+    $("api-status").className = "badge";
+    $("api-status").textContent = "AUTENTICAZIONE";
+
+    $("recent-scans").innerHTML =
+        '<tr><td colspan="4" class="empty">Autenticazione richiesta</td></tr>';
+
+    $("violations-table").innerHTML =
+        '<tr><td colspan="6" class="empty">Autenticazione richiesta</td></tr>';
+
+    $("events-table").innerHTML =
+        '<tr><td colspan="5" class="empty">Autenticazione richiesta</td></tr>';
+}
+
+const API_BASE = "api";
+
+function getCookie(name) {
+    const cookies = document.cookie ? document.cookie.split(";") : [];
+
+    for (const cookie of cookies) {
+        const value = cookie.trim();
+
+        if (value.startsWith(name + "=")) {
+            return decodeURIComponent(value.substring(name.length + 1));
+        }
+    }
+
+    return null;
+}
+
+async function apiFetch(url, options = {}) {
+    const headers = new Headers(options.headers || {});
+    const method = (options.method || "GET").toUpperCase();
+
+    if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+        const csrfToken = getCookie("csrftoken");
+
+        if (!csrfToken) {
+            throw new Error("Token CSRF Horizon non disponibile.");
+        }
+
+        headers.set("X-CSRFToken", csrfToken);
+    }
+
+    const response = await fetch(url, {
+        ...options,
+        headers,
+        credentials: "same-origin"
+    });
+
+    if (response.status === 401) {
+        clearAuthentication("Sessione Horizon scaduta");
+    }
+
+    return response;
+}
+
+async function refreshDashboard() {
+    if (!isAuthenticated) {
+        $("api-status").className = "badge";
+        $("api-status").textContent = "AUTENTICAZIONE";
+        $("api-detail").textContent = "Sessione Horizon richiesta";
+        return;
+    }
+
+    try {
+        const [healthResponse, dataResponse, eventsResponse] =
+            await Promise.all([
+                apiFetch(`${API_BASE}/health`),
+                apiFetch(`${API_BASE}/dashboard-data`),
+                apiFetch(`${API_BASE}/quarantine-events?limit=500`)
+            ]);
+
+        if (
+            !healthResponse.ok ||
+            !dataResponse.ok ||
+            !eventsResponse.ok
+        ) {
+            throw new Error("API non disponibile");
+        }
+
+        const health = await healthResponse.json();
+        const data = await dataResponse.json();
+        const eventData = await eventsResponse.json();
+        const allEvents = eventData.quarantine_events ||
+            data.quarantine_events || [];
+
+        $("api-status").className = "badge green";
+        $("api-status").textContent = "ONLINE";
+        $("api-detail").textContent = health.status;
+        $("last-refresh").textContent =
+            "Aggiornato alle " + new Date().toLocaleTimeString("it-IT");
+
+        $("scans-count").textContent = data.summary.scans_count;
+        $("open-count").textContent = data.summary.violations_open;
+        $("resolved-count").textContent = data.summary.violations_resolved;
+        $("events-count").textContent = eventData.total_count;
+
+        const scheduler = data.scheduler;
+        const schedulerLabels = {
+            active: "Regolare",
+            stale: "In ritardo",
+            waiting: "In attesa della prima scansione"
+        };
+        $("scheduler-status").innerHTML = badge(
+            schedulerLabels[scheduler.status] || scheduler.status
+        );
+        $("last-auto").textContent = formatDate(scheduler.last_automatic_scan);
+        $("next-auto").textContent = formatDate(scheduler.next_automatic_scan);
+        $("interval").textContent = scheduler.interval_seconds + " secondi";
+        $("dry-run").innerHTML = data.dry_run ?
+            badge("SIMULAZIONE ATTIVA") :
+            badge("SIMULAZIONE DISATTIVATA · interventi reali");
+
+        const scans = data.scans.slice(0, 8);
+        $("recent-scans").innerHTML = scans.length ? scans.map(scan => `
+            <tr>
+                <td>#${escapeHtml(scan.id)}</td>
+                <td>${escapeHtml(scan.source || "legacy")}</td>
+                <td>${badge(scan.status)}</td>
+                <td>${escapeHtml(scan.violations_found)}</td>
+            </tr>`).join("") :
+            '<tr><td colspan="4" class="empty">Nessuna scansione registrata</td></tr>';
+
+        const violations = data.violations.slice(0, 30);
+        $("violation-total").textContent = data.violations.length + " record";
+        $("violations-table").innerHTML = violations.length ? violations.map(item => `
+            <tr>
+                <td><strong>${escapeHtml(item.rule_id)}</strong></td>
+                <td>${escapeHtml(item.instance_name || item.instance_id)}</td>
+                <td>${escapeHtml(item.message)}</td>
+                <td>${badge(item.severity)}</td>
+                <td>${badge(item.status)}</td>
+                <td>${formatDate(item.last_seen)}</td>
+            </tr>`).join("") :
+            '<tr><td colspan="6" class="empty">Nessuna violazione</td></tr>';
+
+        const activeQuarantines = getActiveQuarantines(allEvents);
+
+        // Individua l'evento più recente per ogni istanza.
+        const latestEventByInstance = new Map();
+        const orderedEvents = [...allEvents].sort(
+            (a, b) => Number(b.id) - Number(a.id)
+        );
+
+        for (const event of orderedEvents) {
+            const instanceId = String(event.instance_id);
+            if (!latestEventByInstance.has(instanceId)) {
+                latestEventByInstance.set(instanceId, String(event.id));
+            }
+        }
+
+        const events = orderedEvents.slice(0, 10);
+
+        $("events-table").innerHTML = events.length ? events.map(item => {
+            const instanceId = String(item.instance_id);
+            const canRestore =
+                isAdmin &&
+                activeQuarantines.has(instanceId) &&
+                latestEventByInstance.get(instanceId) === String(item.id);
+
+            const actionButton = canRestore
+                ? `<button class="restore-button"
+                    data-restore-instance="${escapeHtml(item.instance_id)}">
+                    Ripristina
+                   </button>`
+                : "—";
+
+            let displayedResult = item.result;
+
+            if (item.action === "quarantine" && item.details) {
+                try {
+                    const details = typeof item.details === "string"
+                        ? JSON.parse(item.details)
+                        : item.details;
+
+                    const portStatuses = (details.ports || [])
+                        .map(port => port.status);
+
+                    if (
+                        portStatuses.length > 0 &&
+                        portStatuses.every(status =>
+                            status === "already_quarantined"
+                        )
+                    ) {
+                        displayedResult = "already_quarantined";
+                    }
+                } catch (error) {
+                    console.warn(
+                        "Impossibile interpretare i dettagli dell'evento:",
+                        error
+                    );
+                }
+            }
+
+            return `
+                <tr>
+                    <td>${formatDate(item.created_at)}</td>
+                    <td>${escapeHtml(item.instance_id)}</td>
+                    <td>${escapeHtml(item.action)}</td>
+                    <td>${badge(displayedResult)}</td>
+                    <td>${actionButton}</td>
+                </tr>`;
+        }).join("") :
+            '<tr><td colspan="5" class="empty">Nessun evento registrato</td></tr>';
+
+        document.querySelectorAll("[data-restore-instance]").forEach(
+            button => {
+                button.addEventListener("click", () => {
+                    restoreInstance(button.dataset.restoreInstance, button);
+                });
+            }
+        );
+
+    } catch (error) {
+        if (!isAuthenticated) {
+            $("api-status").className = "badge";
+            $("api-status").textContent = "AUTENTICAZIONE";
+        } else {
+            $("api-status").className = "badge red";
+            $("api-status").textContent = "OFFLINE";
+        }
+        $("api-detail").textContent = error.message;
+    }
+}
+
+async function initializeDashboard() {
+    $("auth-status").textContent = "Verifica sessione Horizon...";
+
+    try {
+        const response = await apiFetch(`${API_BASE}/auth-info`);
+
+        if (!response.ok) {
+            throw new Error("Autenticazione Horizon non riuscita.");
+        }
+
+        const identity = await response.json();
+
+        if (identity.authenticated !== true) {
+            throw new Error("Sessione Horizon non autenticata.");
+        }
+
+        isAuthenticated = true;
+        isAdmin = identity.is_admin === true;
+
+        $("auth-status").textContent =
+            identity.user_name + (isAdmin ? " · Admin" : " · Utente");
+
+        $("scan-button").hidden = !isAdmin;
+
+        await refreshDashboard();
+
+    } catch (error) {
+        clearAuthentication("Accesso Horizon non disponibile");
+        $("api-detail").textContent = error.message;
+    }
+}
+
+async function manualScan() {
+    const button = $("scan-button");
+    button.disabled = true;
+    button.textContent = "Scansione in corso...";
+
+    try {
+        const response = await apiFetch(`${API_BASE}/scan`, { method: "POST" });
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || "Scansione non riuscita");
+        }
+
+        button.textContent = "Scansione completata";
+        await refreshDashboard();
+    } catch (error) {
+        button.textContent = "Errore scansione";
+        alert(error.message);
+    } finally {
+        setTimeout(() => {
+            button.disabled = false;
+            button.textContent = "Avvia scansione";
+        }, 1500);
+    }
+}
+
+async function restoreInstance(instanceId, button) {
+    if (!isAdmin) {
+        alert("Operazione riservata agli amministratori.");
+        return;
+    }
+
+    const confirmed = confirm(
+        "Confermi il ripristino della VM?\\n\\n" +
+        "Guardrail ripristinerà i gruppi di sicurezza Neutron " +
+        "precedenti alla quarantena."
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    button.disabled = true;
+    button.textContent = "Ripristino...";
+
+    try {
+        const response = await apiFetch(
+            `${API_BASE}/restore/` + encodeURIComponent(instanceId),
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    dry_run: false
+                })
+            }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                result.error || "Ripristino non riuscito."
+            );
+        }
+
+        if (result.result === "restored") {
+            alert("Ripristino completato correttamente.");
+        } else if (result.result === "partial") {
+            alert(
+                "Ripristino parziale. Verificare gli eventi e " +
+                "lo stato delle porte Neutron."
+            );
+        } else {
+            throw new Error(
+                "Ripristino non completato: " + result.result
+            );
+        }
+
+        await refreshDashboard();
+
+    } catch (error) {
+        alert("Errore durante il ripristino: " + error.message);
+        button.disabled = false;
+        button.textContent = "Ripristina";
+    }
+}
+
+initializeDashboard();
+setInterval(refreshDashboard, 15000);
+</script>
+{% endblock %}

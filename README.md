@@ -373,16 +373,21 @@ Per attivare la modalità simulata, impostare `quarantine_dry_run` a
 
 ## API REST
 
-Guardrail espone un'API REST attraverso Flask. Gli endpoint `/` e
-`/health` sono pubblici. Tutti gli altri endpoint richiedono
-autenticazione Keystone; le operazioni amministrative richiedono inoltre
-un utente con ruolo amministrativo.
+Guardrail espone un'API REST attraverso Flask, utilizzata dal pannello
+Horizon tramite un proxy interno.
+
+L'autenticazione degli endpoint API è gestita tramite Keystone.
+Le operazioni amministrative richiedono inoltre un utente con ruolo
+amministrativo.
+
+L'unico endpoint pubblico è `/health`, utilizzato per verificare lo
+stato del servizio. La route `/` non espone la dashboard e restituisce
+un errore 404. La dashboard non è accessibile direttamente tramite
+Flask.
 
   --------------------------------------------------------------------------------
   Metodo            Endpoint                   Descrizione       Autorizzazione
   ----------------- -------------------------- ----------------- -----------------
-  GET               `/`                        Dashboard web.    Pubblica
-
   GET               `/health`                  Verifica dello    Pubblica
                                                stato del
                                                servizio.
@@ -418,16 +423,20 @@ un utente con ruolo amministrativo.
 
   --------------------------------------------------------------------------------
 
-L'API è raggiungibile direttamente all'indirizzo:
-
-``` text
-http://127.0.0.1:9876
-```
+L'API Flask ascolta sull'indirizzo locale `127.0.0.1:9876` e viene
+utilizzata internamente dal proxy del pannello Horizon. Non è previsto
+l'accesso diretto degli utenti all'interfaccia Flask.
 
 ## Dashboard web
 
-Guardrail include una dashboard web realizzata con Flask e HTML, CSS e
-JavaScript.
+La dashboard di Guardrail è integrata in OpenStack Horizon come pannello
+del progetto, accessibile dalla sezione:
+
+`Project → Guardrail`
+
+L'accesso avviene attraverso la sessione autenticata di Horizon.
+Il pannello comunica con l'API Flask tramite un proxy Django interno,
+che inoltra le richieste e le credenziali Keystone.
 
 La dashboard permette di:
 
@@ -438,14 +447,8 @@ La dashboard permette di:
 -   Avviare scansioni manuali.
 -   Richiedere il ripristino delle istanze in quarantena.
 
-La dashboard è raggiungibile direttamente tramite il servizio Flask:
-
-``` text
-http://127.0.0.1:9876/
-```
-
-In questo modo la dashboard può essere raggiunta attraverso lo stesso
-host utilizzato da Horizon, senza esporre direttamente Flask sulla rete.
+La dashboard è quindi disponibile esclusivamente tramite Horizon e
+non attraverso un accesso diretto al servizio Flask.
 
 ## Database e storico
 

@@ -213,10 +213,9 @@ tbody tr:last-child td { border-bottom: 0; }
         <div class="actions">
             <span class="refresh" id="last-refresh">Aggiornamento in attesa</span>
             <div class="auth-panel">
-                <input id="token-input" type="password"
-                    placeholder="Token Keystone" autocomplete="off">
-                <button id="auth-button" onclick="authenticate()">Accedi</button>
-                <span class="auth-status" id="auth-status">Non autenticato</span>
+                <span class="auth-status" id="auth-status">
+                    Verifica sessione Horizon...
+                </span>
             </div>
             <button id="scan-button" onclick="manualScan()" hidden>
                 Avvia scansione
@@ -367,6 +366,7 @@ function badge(value) {
 }
 
 let isAdmin = false;
+let isAuthenticated = false;
 
 function getActiveQuarantines(events) {
     const active = new Map();
@@ -442,12 +442,10 @@ function getActiveQuarantines(events) {
     return new Set(active.keys());
 }
 
-function clearAuthentication(message = "Non autenticato") {
-    sessionStorage.removeItem("guardrail_token");
+function clearAuthentication(message = "Sessione non valida") {
+    isAuthenticated = false;
     isAdmin = false;
-    $("token-input").value = "";
-    $("token-input").disabled = false;
-    $("auth-button").textContent = "Accedi";
+
     $("auth-status").textContent = message;
     $("scan-button").hidden = true;
 
@@ -483,93 +481,61 @@ function clearAuthentication(message = "Non autenticato") {
         '<tr><td colspan="5" class="empty">Autenticazione richiesta</td></tr>';
 }
 
-const API_BASE = "/guardrail";
+const API_BASE = "api";
 
-async function apiFetch(url, options = {}) {
-    const token = sessionStorage.getItem("guardrail_token");
+function getCookie(name) {
+    const cookies = document.cookie ? document.cookie.split(";") : [];
 
-    if (!token) {
-        throw new Error("Autenticazione richiesta.");
+    for (const cookie of cookies) {
+        const value = cookie.trim();
+
+        if (value.startsWith(name + "=")) {
+            return decodeURIComponent(value.substring(name.length + 1));
+        }
     }
 
+    return null;
+}
+
+async function apiFetch(url, options = {}) {
     const headers = new Headers(options.headers || {});
-    headers.set("X-Auth-Token", token);
+    const method = (options.method || "GET").toUpperCase();
+
+    if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+        const csrfToken = getCookie("csrftoken");
+
+        if (!csrfToken) {
+            throw new Error("Token CSRF Horizon non disponibile.");
+        }
+
+        headers.set("X-CSRFToken", csrfToken);
+    }
 
     const response = await fetch(url, {
         ...options,
-        headers
+        headers,
+        credentials: "same-origin"
     });
 
     if (response.status === 401) {
-        clearAuthentication("Sessione scaduta");
-        throw new Error("Token Keystone non valido o scaduto.");
+        clearAuthentication("Sessione Horizon scaduta");
     }
 
     return response;
 }
 
-async function authenticate() {
-    const existingToken = sessionStorage.getItem("guardrail_token");
-
-    if (existingToken) {
-        clearAuthentication();
-        $("api-status").className = "badge";
-        $("api-status").textContent = "AUTENTICAZIONE";
-        $("api-detail").textContent = "Autenticazione terminata";
-        return;
-    }
-
-    const token = $("token-input").value.trim();
-
-    if (!token) {
-        $("auth-status").textContent = "Inserire un token Keystone";
-        return;
-    }
-
-    $("auth-button").disabled = true;
-    $("auth-status").textContent = "Verifica in corso...";
-
-    try {
-        sessionStorage.setItem("guardrail_token", token);
-
-        const response = await apiFetch(`${API_BASE}/auth-info`);
-
-        if (!response.ok) {
-            throw new Error("Autenticazione non riuscita.");
-        }
-
-        const identity = await response.json();
-
-        isAdmin = identity.is_admin === true;
-        $("token-input").value = "";
-        $("token-input").disabled = true;
-        $("auth-button").textContent = "Esci";
-        $("auth-status").textContent =
-            identity.user_name + (isAdmin ? " · Admin" : " · Utente");
-        $("scan-button").hidden = !isAdmin;
-
-        await refreshDashboard();
-
-    } catch (error) {
-        clearAuthentication("Accesso non riuscito");
-        $("api-detail").textContent = error.message;
-    } finally {
-        $("auth-button").disabled = false;
-    }
-}
-
 async function refreshDashboard() {
-    if (!sessionStorage.getItem("guardrail_token")) {
+    if (!isAuthenticated) {
         $("api-status").className = "badge";
         $("api-status").textContent = "AUTENTICAZIONE";
-        $("api-detail").textContent = "Inserire un token Keystone";
+        $("api-detail").textContent = "Sessione Horizon richiesta";
         return;
     }
 
     try {
         const [healthResponse, dataResponse, eventsResponse] =
             await Promise.all([
-                fetch(`${API_BASE}/health`),
+                apiFetch(`${API_BASE}/health`),
                 apiFetch(`${API_BASE}/dashboard-data`),
                 apiFetch(`${API_BASE}/quarantine-events?limit=500`)
             ]);
@@ -716,7 +682,7 @@ async function refreshDashboard() {
         );
 
     } catch (error) {
-        if (!sessionStorage.getItem("guardrail_token")) {
+        if (!isAuthenticated) {
             $("api-status").className = "badge";
             $("api-status").textContent = "AUTENTICAZIONE";
         } else {
@@ -728,36 +694,33 @@ async function refreshDashboard() {
 }
 
 async function initializeDashboard() {
-    const token = sessionStorage.getItem("guardrail_token");
-
-    if (!token) {
-        await refreshDashboard();
-        return;
-    }
-
-    $("token-input").disabled = true;
-    $("auth-button").textContent = "Esci";
-    $("auth-status").textContent = "Verifica sessione...";
+    $("auth-status").textContent = "Verifica sessione Horizon...";
 
     try {
         const response = await apiFetch(`${API_BASE}/auth-info`);
 
         if (!response.ok) {
-            throw new Error("Sessione non valida.");
+            throw new Error("Autenticazione Horizon non riuscita.");
         }
 
         const identity = await response.json();
 
+        if (identity.authenticated !== true) {
+            throw new Error("Sessione Horizon non autenticata.");
+        }
+
+        isAuthenticated = true;
         isAdmin = identity.is_admin === true;
+
         $("auth-status").textContent =
             identity.user_name + (isAdmin ? " · Admin" : " · Utente");
+
         $("scan-button").hidden = !isAdmin;
 
         await refreshDashboard();
+
     } catch (error) {
-        clearAuthentication("Sessione scaduta");
-        $("api-status").className = "badge";
-        $("api-status").textContent = "AUTENTICAZIONE";
+        clearAuthentication("Accesso Horizon non disponibile");
         $("api-detail").textContent = error.message;
     }
 }

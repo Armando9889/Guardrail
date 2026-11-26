@@ -5,6 +5,52 @@
 if is_service_enabled guardrail; then
 
     # ---------------------------------------------------------
+    # INSTALLAZIONE DASHBOARD HORIZON
+    # ---------------------------------------------------------
+    install_guardrail_horizon() {
+        local horizon_dir="${DEST:-/opt/stack}/horizon"
+        local panel_dir="$horizon_dir/openstack_dashboard/dashboards/project/guardrail"
+        local enabled_dir="$horizon_dir/openstack_dashboard/local/enabled"
+        local source_dir="$GUARDRAIL_DIR/dashboard/horizon"
+
+        echo "Guardrail: installazione pannello Horizon"
+
+        if [[ ! -d "$horizon_dir/openstack_dashboard" ]]; then
+            die $LINENO "Guardrail: directory Horizon non trovata: $horizon_dir"
+        fi
+
+        if [[ ! -f "$source_dir/guardrail/views.py" ||
+              ! -f "$source_dir/guardrail/panel.py" ||
+              ! -f "$source_dir/guardrail/urls.py" ||
+              ! -f "$source_dir/guardrail/templates/project/guardrail/index.html" ||
+              ! -f "$source_dir/_50_project_guardrail.py" ]]; then
+            die $LINENO "Guardrail: file di integrazione Horizon mancanti in $source_dir"
+        fi
+
+        install -d -o "$STACK_USER" -g "$STACK_USER" -m 0755 \
+            "$panel_dir/templates/project/guardrail" \
+            "$enabled_dir"
+
+        install -o "$STACK_USER" -g "$STACK_USER" -m 0644 \
+            "$source_dir/guardrail/__init__.py" \
+            "$source_dir/guardrail/panel.py" \
+            "$source_dir/guardrail/urls.py" \
+            "$source_dir/guardrail/views.py" \
+            "$panel_dir/"
+
+        install -o "$STACK_USER" -g "$STACK_USER" -m 0644 \
+            "$source_dir/guardrail/templates/project/guardrail/index.html" \
+            "$panel_dir/templates/project/guardrail/index.html"
+
+        install -o "$STACK_USER" -g "$STACK_USER" -m 0644 \
+            "$source_dir/_50_project_guardrail.py" \
+            "$enabled_dir/_50_project_guardrail.py"
+
+        echo "Guardrail: pannello Horizon Project installato."
+    }
+
+
+    # ---------------------------------------------------------
     # INSTALL
     # ---------------------------------------------------------
     if [[ "$1" == "stack" && "$2" == "install" ]]; then
@@ -23,6 +69,8 @@ if is_service_enabled guardrail; then
     # ---------------------------------------------------------
     if [[ "$1" == "stack" && "$2" == "post-config" ]]; then
         echo "Guardrail: post-config phase"
+
+        install_guardrail_horizon
 
         install -d -o "$STACK_USER" -g "$STACK_USER" -m 0750 \
             "$GUARDRAIL_CONF_DIR" \

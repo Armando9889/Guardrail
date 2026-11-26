@@ -3,7 +3,7 @@ import os
 from functools import wraps
 from datetime import datetime, timedelta, timezone
 
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request
 
 from guardrail.controller import GuardrailController
 
@@ -19,7 +19,7 @@ class PublicEndpointsMiddleware:
 
     def __call__(self, environ, start_response):
         path = environ.get("PATH_INFO", "")
-        if path in ("/", "/health"):
+        if path == "/health":
             return self.public_app(environ, start_response)
         return self.authenticated_app(environ, start_response)
 
@@ -261,8 +261,10 @@ def create_app(controller=None, enable_auth=False):
 
     @app.route("/", methods=["GET"])
     def dashboard():
-        """Mostra la dashboard web di Guardrail."""
-        return render_template("dashboard.html")
+        """La dashboard è disponibile esclusivamente tramite Horizon."""
+        return jsonify({
+            "error": "Dashboard disponibile esclusivamente tramite Horizon."
+        }), 404
 
     @app.route("/dashboard-data", methods=["GET"])
     @require_identity()
