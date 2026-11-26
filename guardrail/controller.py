@@ -578,12 +578,11 @@ class GuardrailController:
             for violation in violations:
                 violation["scan_id"] = scan_id
 
-                if violation.get("instance_id") is not None:
-                    violation_id = self.database.record_violation(
-                        violation
-                    )
+                violation_id = self.database.record_violation(
+                    violation
+                )
 
-                    violation["violation_id"] = violation_id
+                violation["violation_id"] = violation_id
 
             # Risoluzione delle violazioni non più presenti.
             active_keys = [
@@ -592,7 +591,6 @@ class GuardrailController:
                     violation["instance_id"],
                 )
                 for violation in violations
-                if violation.get("instance_id") is not None
             ]
 
             self.database.resolve_absent_violations(active_keys)

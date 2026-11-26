@@ -10,7 +10,7 @@ class TestQuarantineManager(unittest.TestCase):
     def setUp(self):
         self.connection = MagicMock()
         self.database = MagicMock()
-        self.database.get_instance_quarantine_events.return_value = None
+        self.database.get_instance_quarantine_events.return_value = []
 
         self.manager = QuarantineManager(
             connection=self.connection,
@@ -283,11 +283,11 @@ class TestQuarantineManager(unittest.TestCase):
                         dry_run=value,
                     )
 
-                self.database.get_latest_quarantine_event.assert_not_called()
+                self.database.get_instance_quarantine_events.assert_not_called()
                 self.connection.network.assert_not_called()
 
     def test_restore_rejects_already_quarantined_port(self):
-        self.database.get_latest_quarantine_event.return_value = {
+        self.database.get_instance_quarantine_events.return_value = [{
             "id": 1,
             "instance_id": "vm-123",
             "action": "quarantine",
@@ -301,7 +301,7 @@ class TestQuarantineManager(unittest.TestCase):
                     }
                 ]
             },
-        }
+        }]
 
         with self.assertRaises(QuarantineError):
             self.manager.restore_instance("vm-123")
@@ -309,7 +309,7 @@ class TestQuarantineManager(unittest.TestCase):
         self.connection.network.update_port.assert_not_called()
 
     def test_restore_ignores_already_quarantined_ports(self):
-        self.database.get_latest_quarantine_event.return_value = {
+        self.database.get_instance_quarantine_events.return_value = [{
             "id": 1,
             "instance_id": "vm-123",
             "action": "quarantine",
@@ -328,7 +328,7 @@ class TestQuarantineManager(unittest.TestCase):
                     },
                 ]
             },
-        }
+        }]
 
         groups = self.manager._load_original_security_groups("vm-123")
 
@@ -338,7 +338,7 @@ class TestQuarantineManager(unittest.TestCase):
         )
 
     def test_restore_ignores_dry_run_restore_events(self):
-        self.database.get_latest_quarantine_event.return_value = {
+        self.database.get_instance_quarantine_events.return_value = [{
             "id": 1,
             "instance_id": "vm-123",
             "action": "quarantine",
@@ -352,9 +352,9 @@ class TestQuarantineManager(unittest.TestCase):
                     }
                 ]
             },
-        }
-        self.database.get_restore_events_after.return_value = [
-            {
+        }]
+        self.database.get_instance_quarantine_events.return_value.extend([
+            {"action": "restore",
                 "id": 2,
                 "result": "dry_run",
                 "details": {
@@ -363,14 +363,13 @@ class TestQuarantineManager(unittest.TestCase):
                     ]
                 },
             }
-        ]
-
+        ])
         groups = self.manager._load_original_security_groups("vm-123")
 
         self.assertEqual(groups, {"port-123": ["sg-original"]})
 
     def test_restore_excludes_already_restored_ports(self):
-        self.database.get_latest_quarantine_event.return_value = {
+        self.database.get_instance_quarantine_events.return_value = [{
             "id": 1,
             "instance_id": "vm-123",
             "action": "quarantine",
@@ -389,9 +388,9 @@ class TestQuarantineManager(unittest.TestCase):
                     },
                 ]
             },
-        }
-        self.database.get_restore_events_after.return_value = [
-            {
+        }]
+        self.database.get_instance_quarantine_events.return_value.extend([
+            {"action": "restore",
                 "id": 2,
                 "result": "partial",
                 "details": {
@@ -401,8 +400,7 @@ class TestQuarantineManager(unittest.TestCase):
                     ]
                 },
             }
-        ]
-
+        ])
         groups = self.manager._load_original_security_groups("vm-123")
 
         self.assertEqual(
@@ -411,7 +409,7 @@ class TestQuarantineManager(unittest.TestCase):
         )
 
     def test_restore_rejects_when_all_ports_are_already_restored(self):
-        self.database.get_latest_quarantine_event.return_value = {
+        self.database.get_instance_quarantine_events.return_value = [{
             "id": 1,
             "instance_id": "vm-123",
             "action": "quarantine",
@@ -425,9 +423,9 @@ class TestQuarantineManager(unittest.TestCase):
                     }
                 ]
             },
-        }
-        self.database.get_restore_events_after.return_value = [
-            {
+        }]
+        self.database.get_instance_quarantine_events.return_value.extend([
+            {"action": "restore",
                 "id": 2,
                 "result": "restored",
                 "details": {
@@ -436,13 +434,12 @@ class TestQuarantineManager(unittest.TestCase):
                     ]
                 },
             }
-        ]
-
+        ])
         with self.assertRaises(QuarantineError):
             self.manager._load_original_security_groups("vm-123")
 
     def test_restore_allows_retry_after_failed_restore(self):
-        self.database.get_latest_quarantine_event.return_value = {
+        self.database.get_instance_quarantine_events.return_value = [{
             "id": 1,
             "instance_id": "vm-123",
             "action": "quarantine",
@@ -456,9 +453,9 @@ class TestQuarantineManager(unittest.TestCase):
                     }
                 ]
             },
-        }
-        self.database.get_restore_events_after.return_value = [
-            {
+        }]
+        self.database.get_instance_quarantine_events.return_value.extend([
+            {"action": "restore",
                 "id": 2,
                 "result": "failed",
                 "details": {
@@ -467,8 +464,7 @@ class TestQuarantineManager(unittest.TestCase):
                     ]
                 },
             }
-        ]
-
+        ])
         groups = self.manager._load_original_security_groups("vm-123")
 
         self.assertEqual(groups, {"port-123": ["sg-original"]})
@@ -689,10 +685,10 @@ class TestQuarantineManager(unittest.TestCase):
                 ["sg-original"],
             )
 
-        self.database.get_latest_quarantine_event.assert_not_called()
+        self.database.get_instance_quarantine_events.assert_not_called()
 
     def test_restore_loads_original_groups_from_database(self):
-        self.database.get_latest_quarantine_event.return_value = {
+        self.database.get_instance_quarantine_events.return_value = [{
             "id": 1,
             "instance_id": "vm-123",
             "action": "quarantine",
@@ -708,13 +704,13 @@ class TestQuarantineManager(unittest.TestCase):
                     }
                 ]
             },
-        }
+        }]
 
         result = self.manager.restore_instance(
             "vm-123",
         )
 
-        self.database.get_latest_quarantine_event.assert_called_once_with(
+        self.database.get_instance_quarantine_events.assert_called_once_with(
             "vm-123"
         )
 
@@ -728,7 +724,7 @@ class TestQuarantineManager(unittest.TestCase):
         self.connection.network.update_port.assert_not_called()
 
     def test_restore_reports_database_event_failure(self):
-        self.database.get_latest_quarantine_event.return_value = {
+        self.database.get_instance_quarantine_events.return_value = [{
             "id": 1,
             "instance_id": "vm-123",
             "action": "quarantine",
@@ -742,7 +738,7 @@ class TestQuarantineManager(unittest.TestCase):
                     }
                 ]
             },
-        }
+        }]
 
         port = SimpleNamespace(
             id="port-123",

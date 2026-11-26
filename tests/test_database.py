@@ -160,52 +160,6 @@ class TestGuardrailDatabase(unittest.TestCase):
                 "quarantined",
             )
 
-    def test_get_restore_events_after_quarantine(self):
-        quarantine_id = self.db.record_quarantine_event(
-            instance_id="vm-restore",
-            action="quarantine",
-            result="quarantined",
-            details={"ports": []},
-        )
-
-        self.db.record_quarantine_event(
-            instance_id="vm-restore",
-            action="restore",
-            result="dry_run",
-            details={"ports": []},
-        )
-
-        restore_id = self.db.record_quarantine_event(
-            instance_id="vm-restore",
-            action="restore",
-            result="partial",
-            details={
-                "ports": [
-                    {"port_id": "port-1", "status": "restored"},
-                    {"port_id": "port-2", "status": "failed"},
-                ]
-            },
-        )
-
-        self.db.record_quarantine_event(
-            instance_id="another-vm",
-            action="restore",
-            result="restored",
-            details={"ports": []},
-        )
-
-        events = self.db.get_restore_events_after(
-            "vm-restore",
-            quarantine_id,
-        )
-
-        self.assertEqual(len(events), 2)
-        self.assertEqual(events[0]["result"], "dry_run")
-        self.assertEqual(events[1]["id"], restore_id)
-        self.assertEqual(
-            events[1]["details"]["ports"][0]["port_id"],
-            "port-1",
-        )
 
     def test_get_instance_quarantine_events_returns_chronological_history(self):
         first_id = self.db.record_quarantine_event(
@@ -252,14 +206,6 @@ class TestGuardrailDatabase(unittest.TestCase):
         )
         self.assertEqual(events[1]["action"], "restore")
 
-    def test_get_restore_events_after_rejects_invalid_event_id(self):
-        for invalid_id in (0, -1, True, "1"):
-            with self.subTest(event_id=invalid_id):
-                with self.assertRaises(ValueError):
-                    self.db.get_restore_events_after(
-                        "vm-restore",
-                        invalid_id,
-                    )
 
     # TEST R7
 
