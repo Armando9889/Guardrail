@@ -176,8 +176,8 @@ una specifica funzionalità.
   `guardrail/database.py`             Gestisce la persistenza SQLite di
                                       scansioni, violazioni ed eventi.
 
-  `guardrail/api.py`                  Espone le API REST e la dashboard
-                                      web.
+  `guardrail/api.py`                  Espone le API REST utilizzate
+                                      internamente dal pannello Horizon.
 
   `guardrail/scheduler.py`            Esegue le scansioni periodiche.
 
@@ -206,7 +206,7 @@ una specifica funzionalità.
 -   **DevStack:** installazione e integrazione del plugin nell'ambiente
     OpenStack.
 -   **Python 3:** implementazione della logica applicativa.
--   **Flask:** realizzazione dell'API REST e della dashboard.
+-   **Flask:** realizzazione dell'API REST.
 -   **openstacksdk:** comunicazione con i servizi OpenStack.
 -   **SQLite:** persistenza dei dati e dello storico delle operazioni.
 -   **systemd:** gestione dei servizi Guardrail.
@@ -258,8 +258,8 @@ due processi gestiti tramite systemd:
   ----------------------------------------------------------------------------
   Servizio                                 Responsabilità
   ---------------------------------------- -----------------------------------
-  `devstack@guardrail-api.service`         Espone l'API REST e la dashboard
-                                           web.
+  `devstack@guardrail-api.service`         Espone l'API REST utilizzata
+                                           internamente da Horizon.
 
   `devstack@guardrail-scheduler.service`   Esegue le scansioni periodiche.
 
@@ -381,9 +381,9 @@ Le operazioni amministrative richiedono inoltre un utente con ruolo
 amministrativo.
 
 L'unico endpoint pubblico è `/health`, utilizzato per verificare lo
-stato del servizio. La route `/` non espone la dashboard e restituisce
-un errore 404. La dashboard non è accessibile direttamente tramite
-Flask.
+stato del servizio. Tutti gli altri endpoint richiedono autenticazione
+tramite Keystone. La dashboard non è accessibile direttamente tramite
+Flask ed è disponibile esclusivamente attraverso Horizon.
 
   --------------------------------------------------------------------------------
   Metodo            Endpoint                   Descrizione       Autorizzazione
