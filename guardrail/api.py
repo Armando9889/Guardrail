@@ -259,13 +259,6 @@ def create_app(controller=None, enable_auth=False):
             }), 500
 
 
-    @app.route("/", methods=["GET"])
-    def dashboard():
-        """La dashboard è disponibile esclusivamente tramite Horizon."""
-        return jsonify({
-            "error": "Dashboard disponibile esclusivamente tramite Horizon."
-        }), 404
-
     @app.route("/dashboard-data", methods=["GET"])
     @require_identity()
     def dashboard_data():

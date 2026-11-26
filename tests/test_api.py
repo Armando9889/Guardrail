@@ -26,15 +26,6 @@ class TestGuardrailAPI(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def test_dashboard_not_available_directly(self):
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(
-            response.get_json()["error"],
-            "Dashboard disponibile esclusivamente tramite Horizon.",
-        )
-
     def test_dashboard_data(self):
         response = self.client.get("/dashboard-data")
 
