@@ -2,8 +2,11 @@
 
 set -Eeuo pipefail
 
-VM_ID="d29803f5-6234-42ed-97f1-b8e74bcf2f6f"
-PORT_ID="46ef0919-acaa-4579-afbc-b6b0037749f2"
+VM1_ID="d29803f5-6234-42ed-97f1-b8e74bcf2f6f"
+PORT1_ID="46ef0919-acaa-4579-afbc-b6b0037749f2"
+
+VM2_ID="1f05a39e-346e-4b5d-bfa2-88e3316b9533"
+PORT2_ID="f20e7ae8-cce0-4af3-b9ec-82196abb7b9d"
 
 ORIGINAL_SG="a6feb72b-c3d9-46ac-aa9d-c18487f347ca"
 QUARANTINE_SG="ae44f533-c1cb-4d7e-992e-ab862abdbb94"
@@ -11,9 +14,46 @@ QUARANTINE_SG="ae44f533-c1cb-4d7e-992e-ab862abdbb94"
 API="http://127.0.0.1:9876"
 TOKEN=""
 CLEANUP_READY=0
+SCHEDULER_WAS_ACTIVE=0
 
 pause() {
     read -r -p "Premi INVIO per continuare..."
+}
+
+restore_vm() {
+    local vm_id="$1"
+    local port_id="$2"
+    local current_sg
+
+    current_sg=$(openstack port show "$port_id" \
+        -f value -c security_group_ids)
+
+    if [[ "$current_sg" == *"$QUARANTINE_SG"* ]]; then
+        echo "Ripristino VM $vm_id..."
+
+        curl -fsS -o /dev/null -X POST \
+            -H "X-Auth-Token: $TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"dry_run": false}' \
+            "$API/restore/$vm_id"
+
+        sleep 2
+    elif [[ "$current_sg" == *"$ORIGINAL_SG"* ]]; then
+        echo "VM $vm_id: Security Group già originale."
+    else
+        echo "Errore: Security Group inatteso sulla porta $port_id."
+        return 1
+    fi
+
+    current_sg=$(openstack port show "$port_id" \
+        -f value -c security_group_ids)
+
+    if [[ "$current_sg" != *"$ORIGINAL_SG"* ]]; then
+        echo "Errore: ripristino non verificato per VM $vm_id."
+        return 1
+    fi
+
+    echo "VM $vm_id: Security Group originale ripristinato."
 }
 
 cleanup() {
@@ -22,31 +62,36 @@ cleanup() {
 
     if [[ "$CLEANUP_READY" == "1" ]]; then
         echo
-        echo "===== RIPRISTINO FINALE ====="
+        echo "========== RIPRISTINO FINALE DI SICUREZZA =========="
 
-        CURRENT_SG=$(openstack port show "$PORT_ID" \
-            -f value -c security_group_ids 2>/dev/null || true)
+        RESTORE_OK=1
 
-        if [[ "$CURRENT_SG" == *"$QUARANTINE_SG"* ]]; then
-            echo "Ripristino di sicurezza tramite API..."
+        restore_vm "$VM1_ID" "$PORT1_ID" || RESTORE_OK=0
+        restore_vm "$VM2_ID" "$PORT2_ID" || RESTORE_OK=0
 
-            curl -fsS -o /dev/null -X POST \
-                -H "X-Auth-Token: $TOKEN" \
-                -H "Content-Type: application/json" \
-                -d '{"dry_run": false}' \
-                "$API/restore/$VM_ID" || true
-        fi
+        FINAL_SG1=$(openstack port show "$PORT1_ID" \
+            -f value -c security_group_ids) || RESTORE_OK=0
 
+        FINAL_SG2=$(openstack port show "$PORT2_ID" \
+            -f value -c security_group_ids) || RESTORE_OK=0
 
-        CURRENT_SG=$(openstack port show "$PORT_ID" \
-            -f value -c security_group_ids 2>/dev/null || true)
+        echo
+        echo "Stato finale Security Group:"
+        echo "VM 1: $FINAL_SG1"
+        echo "VM 2: $FINAL_SG2"
 
-        if [[ "$CURRENT_SG" == *"$ORIGINAL_SG"* ]]; then
-            echo "Security Group originale ripristinato."
-            sudo systemctl start devstack@guardrail-scheduler.service
-            echo "Scheduler riattivato."
+        if [[ "$FINAL_SG1" == *"$ORIGINAL_SG"* && \
+              "$FINAL_SG2" == *"$ORIGINAL_SG"* && \
+              "$RESTORE_OK" == "1" ]]; then
+
+            echo "Ripristino di entrambe le VM verificato."
+
+            if [[ "$SCHEDULER_WAS_ACTIVE" == "1" ]]; then
+                sudo systemctl start devstack@guardrail-scheduler.service
+                echo "Scheduler riattivato."
+            fi
         else
-            echo "ATTENZIONE: controllare manualmente la porta."
+            echo "ATTENZIONE: ripristino non verificato."
             echo "Scheduler lasciato fermo per sicurezza."
         fi
     fi
@@ -62,13 +107,13 @@ echo "             DEMO GUARDRAIL"
 echo "======================================"
 
 echo
-echo "[1/6] VERIFICA DEI SERVIZI"
+echo "[1/7] VERIFICA DEI SERVIZI"
 
 systemctl is-active --quiet devstack@guardrail-api.service
 echo "API Guardrail: attiva"
 
 echo
-echo "[2/6] AUTENTICAZIONE"
+echo "[2/7] AUTENTICAZIONE"
 
 set +u
 source /opt/stack/devstack/openrc admin admin
@@ -79,27 +124,51 @@ TOKEN=$(openstack token issue -f value -c id)
 curl -fsS "$API/health" >/dev/null
 echo "Autenticazione e API: OK"
 
-echo
-echo "[3/6] PREPARAZIONE DELLA VM"
+CLEANUP_READY=1
 
-CURRENT_SG=$(openstack port show "$PORT_ID" \
-    -f value -c security_group_ids)
+if systemctl is-active --quiet devstack@guardrail-scheduler.service; then
+    SCHEDULER_WAS_ACTIVE=1
+    sudo systemctl stop devstack@guardrail-scheduler.service
+fi
 
-if [[ "$CURRENT_SG" != *"$ORIGINAL_SG"* ]]; then
-    echo "Errore: la VM non parte dal Security Group originale."
+if systemctl is-active --quiet devstack@guardrail-scheduler.service; then
+    echo "Errore: impossibile fermare lo scheduler."
     exit 1
 fi
 
-CLEANUP_READY=1
+echo "Scheduler fermato temporaneamente per la demo."
 
-echo "VM già non conforme: i metadati rimangono invariati."
+echo
+echo "[3/7] VERIFICA DELLE DUE VM"
+
+VM2_STATUS=$(openstack server show "$VM2_ID" \
+    -f value -c status)
+
+echo "VM 1: $(openstack server show "$VM1_ID" -f value -c status)"
+echo "VM 2: $VM2_STATUS"
+
+if [[ "$VM2_STATUS" != "ERROR" ]]; then
+    echo "Errore: la seconda VM non risulta nello stato ERROR atteso."
+    exit 1
+fi
+
+echo "La seconda VM è ERROR: il suo stato non verrà modificato."
+
+echo
+echo "[4/7] RIPRISTINO INIZIALE DEI SECURITY GROUP"
+
+restore_vm "$VM1_ID" "$PORT1_ID"
+restore_vm "$VM2_ID" "$PORT2_ID"
+
+echo
+echo "Entrambe le VM partono dai Security Group originali."
 
 pause
 
 echo
-echo "[4/6] SCANSIONE E QUARANTENA"
+echo "[5/7] SCANSIONE E QUARANTENA"
 
-echo "Avvio della scansione delle istanze..."
+echo "Avvio della scansione globale..."
 
 SCAN_RESULT=$(curl -fsS -X POST \
     -H "X-Auth-Token: $TOKEN" \
@@ -108,78 +177,86 @@ SCAN_RESULT=$(curl -fsS -X POST \
 echo "Scansione completata."
 
 echo
-echo "Violazioni rilevate sulla VM demo:"
+echo "Violazioni rilevate:"
 
 printf '%s\n' "$SCAN_RESULT" | python3 -c '
 import json
 import sys
 
 data = json.load(sys.stdin)
-vm_id = sys.argv[1]
 
-found = False
+vms = {
+    sys.argv[1]: "VM 1",
+    sys.argv[2]: "VM 2",
+}
 
-for violation in data.get("violations", []):
-    if violation.get("instance_id") == vm_id:
-        rule = violation.get("rule") or violation.get("rule_id")
-        message = violation.get("message", "")
-        print("- {}: {}".format(rule, message))
-        found = True
+for vm_id, label in vms.items():
+    print("\n{}:".format(label))
+    found = False
 
-if not found:
-    print("Nessuna violazione rilevata.")
-' "$VM_ID"
+    for violation in data.get("violations", []):
+        if violation.get("instance_id") == vm_id:
+            rule = violation.get("rule") or violation.get("rule_id")
+            message = violation.get("message", "")
+            print("- {}: {}".format(rule, message))
+            found = True
+
+    if not found:
+        print("Nessuna violazione rilevata.")
+' "$VM1_ID" "$VM2_ID"
 
 echo
-echo "La regola R6 determina l'attivazione della quarantena."
+echo "Verifica della quarantena..."
 
 sleep 2
 
-CURRENT_SG=$(openstack port show "$PORT_ID" \
-    -f value -c security_group_ids)
+for PORT_ID in "$PORT1_ID" "$PORT2_ID"; do
+    CURRENT_SG=$(openstack port show "$PORT_ID" \
+        -f value -c security_group_ids)
 
-if [[ "$CURRENT_SG" != *"$QUARANTINE_SG"* ]]; then
-    echo "Errore: la quarantena non risulta applicata."
-    exit 1
-fi
+    if [[ "$CURRENT_SG" != *"$QUARANTINE_SG"* ]]; then
+        echo "Errore: quarantena non verificata sulla porta $PORT_ID."
+        exit 1
+    fi
+
+    echo "Porta $PORT_ID: quarantena applicata."
+done
 
 echo
-echo "Quarantena reale applicata con successo."
-
-openstack port show "$PORT_ID" -c security_group_ids
+echo "Quarantena reale verificata su entrambe le VM."
 
 pause
 
 echo
-echo "[5/6] RIPRISTINO DELLA VM"
+echo "[6/7] RIPRISTINO DELLE DUE VM"
 
-echo "Richiesta di ripristino tramite API..."
+restore_vm "$VM1_ID" "$PORT1_ID"
+restore_vm "$VM2_ID" "$PORT2_ID"
 
-curl -fsS -o /dev/null -X POST \
-    -H "X-Auth-Token: $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"dry_run": false}' \
-    "$API/restore/$VM_ID"
+echo
+echo "Security Group originali ripristinati su entrambe le VM."
 
-echo "Richiesta di ripristino completata."
+echo
+echo "[7/7] VERIFICA FINALE"
 
-sleep 2
+VM2_STATUS=$(openstack server show "$VM2_ID" \
+    -f value -c status)
 
-CURRENT_SG=$(openstack port show "$PORT_ID" \
-    -f value -c security_group_ids)
-
-if [[ "$CURRENT_SG" != *"$ORIGINAL_SG"* ]]; then
-    echo "Errore: il Security Group originale non è stato ripristinato."
+if [[ "$VM2_STATUS" != "ERROR" ]]; then
+    echo "Errore: lo stato della seconda VM è cambiato."
     exit 1
 fi
 
-echo
-echo "Security Group originale ripristinato correttamente."
-
-openstack port show "$PORT_ID" -c security_group_ids
+echo "VM 1 - Security Group:"
+openstack port show "$PORT1_ID" -c security_group_ids
 
 echo
-echo "[6/6] DEMO COMPLETATA"
+echo "VM 2 - Security Group:"
+openstack port show "$PORT2_ID" -c security_group_ids
 
-echo "Quarantena e ripristino verificati direttamente su OpenStack."
-echo "Guardrail ha completato correttamente il ciclo di protezione."
+echo
+echo "VM 2 - Stato: $VM2_STATUS"
+echo
+echo "DEMO COMPLETATA."
+echo "Quarantena e ripristino verificati su entrambe le VM."
+echo "La seconda VM è rimasta nello stato ERROR."
