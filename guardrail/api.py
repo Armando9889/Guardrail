@@ -1,6 +1,5 @@
 import logging
 import os
-from functools import wraps
 from datetime import datetime, timedelta, timezone
 
 from flask import Flask, jsonify, request
@@ -34,37 +33,41 @@ def create_app(controller=None, enable_auth=False):
     app.config["GUARDRAIL_CONTROLLER"] = guardrail
     app.config["AUTH_ENABLED"] = enable_auth
 
-    def require_identity(admin=False):
-        """Verifica l'identità Keystone e, se richiesto, il ruolo admin."""
+    @app.before_request
+    def check_authentication():
+        if not app.config["AUTH_ENABLED"]:
+            return None
 
-        def decorator(view):
-            @wraps(view)
-            def wrapped(*args, **kwargs):
-                if not app.config["AUTH_ENABLED"]:
-                    return view(*args, **kwargs)
+        if request.endpoint in (None, "health"):
+            return None
 
-                identity_status = request.headers.get("X-Identity-Status")
-                user_id = request.headers.get("X-User-Id")
+        identity_status = request.headers.get("X-Identity-Status")
+        user_id = request.headers.get("X-User-Id")
 
-                if identity_status != "Confirmed" or not user_id:
-                    return jsonify({
-                        "error": "Autenticazione Keystone richiesta."
-                    }), 401
+        if identity_status != "Confirmed" or not user_id:
+            return jsonify({
+                "error": "Autenticazione Keystone richiesta."
+            }), 401
 
-                if admin:
-                    roles = {
-                        role.strip().lower()
-                        for role in request.headers.get("X-Roles", "").split(",")
-                    }
-                    if "admin" not in roles:
-                        return jsonify({
-                            "error": "È richiesto il ruolo admin."
-                        }), 403
+        admin_endpoints = {
+            "scan",
+            "restore",
+            "audit_events",
+            "update_policy",
+        }
 
-                return view(*args, **kwargs)
+        if request.endpoint in admin_endpoints:
+            roles = {
+                role.strip().lower()
+                for role in request.headers.get("X-Roles", "").split(",")
+            }
 
-            return wrapped
-        return decorator
+            if "admin" not in roles:
+                return jsonify({
+                    "error": "È richiesto il ruolo admin."
+                }), 403
+
+        return None
 
     def record_audit(action, resource, details=None):
         """Registra un'operazione amministrativa senza salvare il token."""
@@ -88,7 +91,6 @@ def create_app(controller=None, enable_auth=False):
         }), 200
 
     @app.route("/auth-info", methods=["GET"])
-    @require_identity()
     def auth_info():
         """Restituisce le informazioni essenziali dell'utente autenticato."""
         roles = {
@@ -104,7 +106,6 @@ def create_app(controller=None, enable_auth=False):
 
 
     @app.route("/scan", methods=["POST"])
-    @require_identity(admin=True)
     def scan():
         try:
             result = guardrail.scan()
@@ -138,7 +139,6 @@ def create_app(controller=None, enable_auth=False):
             }), 500
 
     @app.route("/restore/<instance_id>", methods=["POST"])
-    @require_identity(admin=True)
     def restore(instance_id):
         try:
             payload = request.get_json(silent=True)
@@ -197,7 +197,6 @@ def create_app(controller=None, enable_auth=False):
             }), 500
 
     @app.route("/quarantine-events", methods=["GET"])
-    @require_identity()
     def quarantine_events():
         try:
             limit = request.args.get("limit", default=50, type=int)
@@ -230,7 +229,6 @@ def create_app(controller=None, enable_auth=False):
 
 
     @app.route("/audit-events", methods=["GET"])
-    @require_identity(admin=True)
     def audit_events():
         """Restituisce lo storico delle operazioni amministrative."""
         try:
@@ -260,7 +258,6 @@ def create_app(controller=None, enable_auth=False):
 
 
     @app.route("/dashboard-data", methods=["GET"])
-    @require_identity()
     def dashboard_data():
         """Restituisce i dati aggregati per la dashboard."""
         try:
@@ -349,7 +346,6 @@ def create_app(controller=None, enable_auth=False):
             }), 500
 
     @app.route("/policy", methods=["PUT"])
-    @require_identity(admin=True)
     def update_policy():
         try:
             payload = request.get_json(silent=True)
